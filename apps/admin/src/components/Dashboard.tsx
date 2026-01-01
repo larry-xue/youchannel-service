@@ -8,7 +8,9 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Badge } from "./ui/badge";
 import { Skeleton } from "./ui/skeleton";
-import { LogOut, Play } from "lucide-react";
+import { LogOut, Play, Users } from "lucide-react";
+import { useState } from "react";
+import { AdminUsers } from "./AdminUsers";
 
 function formatTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -32,13 +34,16 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+type Tab = "dashboard" | "users";
+
 export function Dashboard() {
   const { session } = useAuth();
   const token = session?.access_token;
+  const [activeTab, setActiveTab] = useState<Tab>("dashboard");
 
   const syncRunsQuery = useQuery({
     queryKey: ["sync-runs"],
-    enabled: Boolean(token),
+    enabled: Boolean(token) && activeTab === "dashboard",
     queryFn: () => fetchSyncRuns(token ?? "")
   });
 
@@ -62,13 +67,23 @@ export function Dashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {activeTab === "dashboard" && (
+            <Button
+              onClick={() => kickoffMutation.mutate()}
+              disabled={kickoffMutation.isPending}
+              size="lg"
+            >
+              <Play className="mr-2 h-4 w-4" />
+              {kickoffMutation.isPending ? "Enqueuing..." : "Kickoff Sync"}
+            </Button>
+          )}
           <Button
-            onClick={() => kickoffMutation.mutate()}
-            disabled={kickoffMutation.isPending}
+            variant={activeTab === "users" ? "default" : "outline"}
+            onClick={() => setActiveTab(activeTab === "users" ? "dashboard" : "users")}
             size="lg"
           >
-            <Play className="mr-2 h-4 w-4" />
-            {kickoffMutation.isPending ? "Enqueuing..." : "Kickoff Sync"}
+            <Users className="mr-2 h-4 w-4" />
+            {activeTab === "users" ? "Dashboard" : "Admin Users"}
           </Button>
           <Button
             variant="ghost"
@@ -81,74 +96,80 @@ export function Dashboard() {
         </div>
       </div>
 
-      {kickoffMutation.error && (
-        <Alert variant="destructive">
-          <AlertDescription>
-            Kickoff failed: {String(kickoffMutation.error)}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Sync Runs</CardTitle>
-          <CardDescription>
-            View the history of sync job executions
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {syncRunsQuery.isLoading ? (
-            <div className="space-y-3">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : syncRunsQuery.error ? (
+      {activeTab === "users" ? (
+        <AdminUsers />
+      ) : (
+        <>
+          {kickoffMutation.error && (
             <Alert variant="destructive">
               <AlertDescription>
-                Failed to load runs: {String(syncRunsQuery.error)}
+                Kickoff failed: {String(kickoffMutation.error)}
               </AlertDescription>
             </Alert>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Finished</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {syncRunsQuery.data?.rows?.length ? (
-                  syncRunsQuery.data.rows.map((row) => (
-                    <TableRow key={row.id as string}>
-                      <TableCell className="font-mono text-xs">
-                        {(row.id as string).slice(0, 8)}...
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={row.status as string} />
-                      </TableCell>
-                      <TableCell>{row.kickoff_source as string}</TableCell>
-                      <TableCell>{formatTime(row.created_at as string)}</TableCell>
-                      <TableCell>{formatTime(row.started_at as string)}</TableCell>
-                      <TableCell>{formatTime(row.finished_at as string)}</TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                      No sync runs yet. Kick one off to begin.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
           )}
-        </CardContent>
-      </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent Sync Runs</CardTitle>
+              <CardDescription>
+                View the history of sync job executions
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {syncRunsQuery.isLoading ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ) : syncRunsQuery.error ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    Failed to load runs: {String(syncRunsQuery.error)}
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead>Started</TableHead>
+                      <TableHead>Finished</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {syncRunsQuery.data?.rows?.length ? (
+                      syncRunsQuery.data.rows.map((row) => (
+                        <TableRow key={row.id as string}>
+                          <TableCell className="font-mono text-xs">
+                            {(row.id as string).slice(0, 8)}...
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={row.status as string} />
+                          </TableCell>
+                          <TableCell>{row.kickoff_source as string}</TableCell>
+                          <TableCell>{formatTime(row.created_at as string)}</TableCell>
+                          <TableCell>{formatTime(row.started_at as string)}</TableCell>
+                          <TableCell>{formatTime(row.finished_at as string)}</TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                          No sync runs yet. Kick one off to begin.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

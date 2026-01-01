@@ -1,4 +1,4 @@
-﻿const baseUrl = import.meta.env.VITE_JOBS_API_URL as string | undefined;
+const baseUrl = import.meta.env.VITE_JOBS_API_URL as string | undefined;
 
 if (!baseUrl) {
   throw new Error("Missing VITE_JOBS_API_URL");
@@ -42,4 +42,40 @@ export function fetchJobRuns(token: string, params?: { syncRunId?: string; limit
   const suffix = searchParams.toString();
   const path = suffix ? `/admin/job-runs?${suffix}` : "/admin/job-runs";
   return request<{ rows: Array<Record<string, unknown>> }>(path, token);
+}
+
+export function fetchAdminUsers(token: string) {
+  return request<{ rows: Array<{ user_id: string; email?: string; created_at: string; user_created_at?: string }> }>(
+    "/admin/users",
+    token
+  );
+}
+
+export function addAdminUser(
+  token: string,
+  email: string,
+  options?: { password?: string; createIfNotExists?: boolean }
+) {
+  return request<{ success: boolean; data?: unknown; error?: string }>(
+    "/admin/users",
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        password: options?.password,
+        createIfNotExists: options?.createIfNotExists
+      })
+    }
+  );
+}
+
+export function removeAdminUser(token: string, userId: string) {
+  return request<{ success: boolean; error?: string }>(
+    `/admin/users/${userId}`,
+    token,
+    {
+      method: "DELETE"
+    }
+  );
 }
