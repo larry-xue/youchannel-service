@@ -40,12 +40,22 @@ export async function reservePlaylistsForSync(
 
   try {
     await client.query("begin");
+    
+    // Fix: Reset next_sync_at to now() for playlists where next_sync_at is in the future
+    // This can happen if next_sync_at was set incorrectly or if there was a clock skew
+    await client.query(
+      `update playlists
+       set next_sync_at = timezone('utc'::text, now())
+       where entry_status = 'active'
+         and next_sync_at > timezone('utc'::text, now())`
+    );
+    
     const result = await client.query<PlaylistSyncTarget>(
       `select id, user_id, playlist_id, youtube_account_id, sync_interval_sec
        from playlists
        where entry_status = 'active'
-         and next_sync_at <= timezone('utc'::text, now())
-       order by next_sync_at asc
+         and (next_sync_at is null or next_sync_at <= timezone('utc'::text, now()))
+       order by coalesce(next_sync_at, '1970-01-01'::timestamptz) asc
        for update skip locked
        limit $1`,
       [params.limit]
