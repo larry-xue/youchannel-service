@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "@youchannel/admin",
   "private": true,
   "version": "0.0.0",
@@ -11,18 +11,28 @@
     "lint": "echo \"no lint configured\""
   },
   "dependencies": {
+    "@radix-ui/react-label": "^2.1.1",
+    "@radix-ui/react-slot": "^1.2.4",
     "@supabase/supabase-js": "^2.45.4",
+    "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-query": "^5.59.0",
     "@tanstack/react-router": "^1.97.0",
     "@youchannel/core": "workspace:*",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss": "^4.1.18",
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@types/react": "^18.3.10",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
     "typescript": "^5.6.3",
-    "vite": "^5.4.8"
+    "vite": "^7.2.7"
   }
 }

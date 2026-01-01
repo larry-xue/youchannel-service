@@ -1,4 +1,4 @@
-﻿import type PgBoss from "pg-boss";
+import type { PgBoss } from "pg-boss";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import Fastify from "fastify";

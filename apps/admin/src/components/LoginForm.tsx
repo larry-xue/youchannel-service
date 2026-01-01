@@ -1,5 +1,10 @@
-﻿import React, { useState } from "react";
+import React, { useState } from "react";
 import { supabase } from "../lib/supabase";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Alert, AlertDescription } from "./ui/alert";
 
 export function LoginForm() {
   const [email, setEmail] = useState("");
@@ -25,32 +30,49 @@ export function LoginForm() {
   };
 
   return (
-    <form className="card" onSubmit={handleSubmit}>
-      <div className="card-title">Admin Sign In</div>
-      <label className="field">
-        <span>Email</span>
-        <input
-          type="email"
-          required
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="admin@company.com"
-        />
-      </label>
-      <label className="field">
-        <span>Password</span>
-        <input
-          type="password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="••••••••"
-        />
-      </label>
-      {error ? <div className="error">{error}</div> : null}
-      <button className="primary" type="submit" disabled={loading}>
-        {loading ? "Signing in..." : "Sign in"}
-      </button>
-    </form>
+    <Card className="w-full max-w-md">
+      <CardHeader>
+        <CardTitle>Admin Sign In</CardTitle>
+        <CardDescription>
+          Enter your credentials to access the admin panel
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="admin@company.com"
+              disabled={loading}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="••••••••"
+              disabled={loading}
+            />
+          </div>
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? "Signing in..." : "Sign in"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

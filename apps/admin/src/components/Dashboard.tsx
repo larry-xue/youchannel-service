@@ -1,13 +1,35 @@
-﻿import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { kickoff, fetchSyncRuns } from "../lib/jobsApi";
 import { useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Alert, AlertDescription } from "./ui/alert";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
+import { Badge } from "./ui/badge";
+import { Skeleton } from "./ui/skeleton";
+import { LogOut, Play } from "lucide-react";
 
 function formatTime(value: string | null | undefined) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const variantMap: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+    queued: "secondary",
+    running: "default",
+    succeeded: "default",
+    failed: "destructive",
+  };
+
+  return (
+    <Badge variant={variantMap[status] || "outline"} className="capitalize">
+      {status}
+    </Badge>
+  );
 }
 
 export function Dashboard() {
@@ -26,63 +48,107 @@ export function Dashboard() {
   });
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
         <div>
-          <div className="eyebrow">Jobs Control Room</div>
-          <h1>YouChannel Operations</h1>
-          <p className="muted">Queue sync runs, review history, and keep the pipeline healthy.</p>
+          <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+            Jobs Control Room
+          </p>
+          <h1 className="text-4xl font-bold tracking-tight mt-2">
+            YouChannel Operations
+          </h1>
+          <p className="text-muted-foreground mt-2">
+            Queue sync runs, review history, and keep the pipeline healthy.
+          </p>
         </div>
-        <div className="header-actions">
-          <button
-            className="primary"
+        <div className="flex items-center gap-2">
+          <Button
             onClick={() => kickoffMutation.mutate()}
             disabled={kickoffMutation.isPending}
+            size="lg"
           >
+            <Play className="mr-2 h-4 w-4" />
             {kickoffMutation.isPending ? "Enqueuing..." : "Kickoff Sync"}
-          </button>
-          <button className="ghost" onClick={() => supabase.auth.signOut()}>
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => supabase.auth.signOut()}
+            size="lg"
+          >
+            <LogOut className="mr-2 h-4 w-4" />
             Sign out
-          </button>
+          </Button>
         </div>
-      </header>
-      {kickoffMutation.error ? (
-        <div className="error">Kickoff failed: {String(kickoffMutation.error)}</div>
-      ) : null}
+      </div>
 
-      <section className="card list-card">
-        <div className="card-title">Recent Sync Runs</div>
-        {syncRunsQuery.isLoading ? (
-          <div className="muted">Loading runs...</div>
-        ) : syncRunsQuery.error ? (
-          <div className="error">Failed to load runs: {String(syncRunsQuery.error)}</div>
-        ) : (
-          <div className="table">
-            <div className="row header">
-              <div>ID</div>
-              <div>Status</div>
-              <div>Source</div>
-              <div>Created</div>
-              <div>Started</div>
-              <div>Finished</div>
+      {kickoffMutation.error && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            Kickoff failed: {String(kickoffMutation.error)}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Sync Runs</CardTitle>
+          <CardDescription>
+            View the history of sync job executions
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {syncRunsQuery.isLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
             </div>
-            {syncRunsQuery.data?.rows?.length ? (
-              syncRunsQuery.data.rows.map((row) => (
-                <div className="row" key={row.id as string}>
-                  <div className="mono">{(row.id as string).slice(0, 8)}...</div>
-                  <div className={`status status-${row.status}`}>{row.status as string}</div>
-                  <div>{row.kickoff_source as string}</div>
-                  <div>{formatTime(row.created_at as string)}</div>
-                  <div>{formatTime(row.started_at as string)}</div>
-                  <div>{formatTime(row.finished_at as string)}</div>
-                </div>
-              ))
-            ) : (
-              <div className="empty">No sync runs yet. Kick one off to begin.</div>
-            )}
-          </div>
-        )}
-      </section>
+          ) : syncRunsQuery.error ? (
+            <Alert variant="destructive">
+              <AlertDescription>
+                Failed to load runs: {String(syncRunsQuery.error)}
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Started</TableHead>
+                  <TableHead>Finished</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {syncRunsQuery.data?.rows?.length ? (
+                  syncRunsQuery.data.rows.map((row) => (
+                    <TableRow key={row.id as string}>
+                      <TableCell className="font-mono text-xs">
+                        {(row.id as string).slice(0, 8)}...
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={row.status as string} />
+                      </TableCell>
+                      <TableCell>{row.kickoff_source as string}</TableCell>
+                      <TableCell>{formatTime(row.created_at as string)}</TableCell>
+                      <TableCell>{formatTime(row.started_at as string)}</TableCell>
+                      <TableCell>{formatTime(row.finished_at as string)}</TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      No sync runs yet. Kick one off to begin.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,5 +1,5 @@
-﻿import "dotenv/config";
-import PgBoss from "pg-boss";
+import "dotenv/config";
+import { PgBoss } from "pg-boss";
 import { loadConfig } from "./config";
 import { buildLogger } from "./logger";
 import { initSentry } from "./sentry";

@@ -1,15 +1,10 @@
-﻿import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
 import { AuthGate } from "./components/AuthGate";
 
 function RootLayout() {
   return (
-    <div className="app">
-      <div className="background">
-        <div className="orb orb-one" />
-        <div className="orb orb-two" />
-        <div className="grid" />
-      </div>
-      <main className="content">
+    <div className="min-h-screen bg-background">
+      <main className="container mx-auto py-8 px-4">
         <Outlet />
       </main>
     </div>
