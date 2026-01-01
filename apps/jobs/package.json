@@ -1,0 +1,32 @@
+﻿{
+  "name": "@youchannel/jobs",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo \"no lint configured\""
+  },
+  "dependencies": {
+    "@fastify/cors": "^8.4.0",
+    "@sentry/node": "^8.10.0",
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1",
+    "pg": "^8.12.0",
+    "pg-boss": "^9.2.2",
+    "pino": "^9.4.0",
+    "zod": "^3.23.8",
+    "@youchannel/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "@types/pg": "^8.11.8",
+    "pino-pretty": "^11.2.2",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}
