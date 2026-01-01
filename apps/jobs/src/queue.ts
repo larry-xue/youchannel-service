@@ -18,7 +18,7 @@ export async function scheduleKickoff(boss: PgBoss, config: Config, logger: Logg
 
 export function buildSyncPlaylistJobOptions(playlistId?: string | null): SendOptions {
   return {
-    singletonKey: playlistId ? `playlist:${playlistId}` : undefined,
+    singletonKey: playlistId ? `playlist.${playlistId}` : undefined,
     retryLimit: SYNC_RETRY_LIMIT,
     retryDelay: SYNC_RETRY_DELAY_SEC,
     retryBackoff: true,

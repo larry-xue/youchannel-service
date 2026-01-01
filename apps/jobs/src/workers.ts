@@ -253,7 +253,7 @@ async function enqueueAnalyses(params: {
   let enqueued = 0;
   for (const candidate of toQueue) {
     const bossJobId = await params.boss.send(
-      "analyze:video",
+      "analyze.video",
       {
         videoId: candidate.videoId,
         playlistId: params.playlistId,
@@ -261,7 +261,7 @@ async function enqueueAnalyses(params: {
         prompt: params.prompt,
         promptHash
       },
-      { singletonKey: `analysis:${candidate.videoId}:${promptHash}` }
+      { singletonKey: `analysis.${candidate.videoId}.${promptHash}` }
     );
 
     if (bossJobId) {
@@ -292,6 +292,10 @@ export async function registerWorkers(params: {
 }) {
   const { boss, db, logger, config } = params;
 
+  // Ensure queues exist before registering workers
+  await boss.createQueue("kickoff");
+  await boss.createQueue("sync.playlist");
+
   await boss.work("kickoff", async (job) => {
     const kickoffSource = (job.data as { source?: string } | null)?.source ?? "schedule";
     const requestedBy = (job.data as { requestedBy?: string } | null)?.requestedBy ?? null;
@@ -315,14 +319,14 @@ export async function registerWorkers(params: {
       for (const playlist of playlists) {
         const jobRun = await insertJobRun(db, {
           syncRunId: syncRun.id,
-          jobName: "sync:playlist",
+          jobName: "sync.playlist",
           status: "queued",
           playlistId: playlist.id,
           userId: playlist.user_id
         });
 
         const bossJobId = await boss.send(
-          "sync:playlist",
+          "sync.playlist",
           {
             syncRunId: syncRun.id,
             playlistId: playlist.id,
@@ -378,7 +382,7 @@ export async function registerWorkers(params: {
     }
   });
 
-  await boss.work("sync:playlist", { includeMetadata: true }, async (jobs) => {
+  await boss.work("sync.playlist", { includeMetadata: true }, async (jobs) => {
     const jobList = normalizeJobList(jobs);
 
     for (const job of jobList) {
@@ -389,7 +393,7 @@ export async function registerWorkers(params: {
       const payloadUserId = payload?.userId ?? null;
 
       if (!syncRunId || !playlistId || !jobRunId) {
-        throw new Error("sync:playlist missing required payload");
+        throw new Error("sync.playlist missing required payload");
       }
 
       const attempt = typeof job.retryCount === "number" ? job.retryCount + 1 : 1;

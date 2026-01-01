@@ -1,4 +1,4 @@
-﻿import pino from "pino";
+import pino from "pino";
 import type { Config } from "./config";
 
 export function buildLogger(config: Config) {

@@ -1,8 +1,5 @@
-const baseUrl = import.meta.env.VITE_JOBS_API_URL as string | undefined;
-
-if (!baseUrl) {
-  throw new Error("Missing VITE_JOBS_API_URL");
-}
+// 如果设置了 VITE_JOBS_API_URL，使用它；否则使用相对路径（前后端同域）
+const baseUrl = (import.meta.env.VITE_JOBS_API_URL as string | undefined) || "";
 
 async function request<T>(path: string, token: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {

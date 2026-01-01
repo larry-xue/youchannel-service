@@ -1,4 +1,4 @@
-﻿import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import type { Config } from "./config";
 
 export function buildSupabaseClient(config: Config) {
