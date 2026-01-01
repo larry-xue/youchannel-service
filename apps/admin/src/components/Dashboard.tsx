@@ -8,9 +8,10 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Badge } from "./ui/badge";
 import { Skeleton } from "./ui/skeleton";
-import { Activity, AlertTriangle, CheckCircle2, Clock, LogOut, Play, RefreshCw, Users } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Clock, LogOut, Play, RefreshCw, Shield, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AdminUsers } from "./AdminUsers";
+import { SystemUsers } from "./SystemUsers";
 
 function formatTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -91,13 +92,31 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-type Tab = "dashboard" | "users";
+type Tab = "dashboard" | "system-users" | "admin-users";
 
 export function Dashboard() {
   const { session } = useAuth();
   const token = session?.access_token;
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const tabCopy: Record<Tab, { eyebrow: string; title: string; description: string }> = {
+    dashboard: {
+      eyebrow: "Operations",
+      title: "YouChannel Control Center",
+      description: "Queue sync runs, review history, and keep the pipeline healthy."
+    },
+    "system-users": {
+      eyebrow: "Users",
+      title: "User Management",
+      description: "Review every account and the connected YouTube credentials."
+    },
+    "admin-users": {
+      eyebrow: "Administration",
+      title: "Admin Access",
+      description: "Manage admin accounts, add operators, and secure access."
+    }
+  };
+  const activeCopy = tabCopy[activeTab];
 
   const syncRunsQuery = useQuery({
     queryKey: ["sync-runs"],
@@ -248,12 +267,21 @@ export function Dashboard() {
               Dashboard
             </Button>
             <Button
-              variant={activeTab === "users" ? "secondary" : "ghost"}
+              variant={activeTab === "system-users" ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => setActiveTab("users")}
+              onClick={() => setActiveTab("system-users")}
               className="w-full justify-start"
             >
               <Users className="h-4 w-4" />
+              Users
+            </Button>
+            <Button
+              variant={activeTab === "admin-users" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setActiveTab("admin-users")}
+              className="w-full justify-start"
+            >
+              <Shield className="h-4 w-4" />
               Admin Users
             </Button>
           </nav>
@@ -283,15 +311,13 @@ export function Dashboard() {
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              {activeTab === "dashboard" ? "Operations" : "Administration"}
+              {activeCopy.eyebrow}
             </p>
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-              {activeTab === "dashboard" ? "YouChannel Control Center" : "Admin Access"}
+              {activeCopy.title}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              {activeTab === "dashboard"
-                ? "Queue sync runs, review history, and keep the pipeline healthy."
-                : "Manage admin accounts, add operators, and secure access."}
+              {activeCopy.description}
             </p>
           </div>
           {activeTab === "dashboard" && (
@@ -317,8 +343,10 @@ export function Dashboard() {
           )}
         </header>
 
-        {activeTab === "users" ? (
+        {activeTab === "admin-users" ? (
           <AdminUsers />
+        ) : activeTab === "system-users" ? (
+          <SystemUsers />
         ) : (
           <>
             {kickoffMutation.error && (

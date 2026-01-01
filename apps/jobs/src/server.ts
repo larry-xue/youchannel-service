@@ -1,5 +1,5 @@
 import type { PgBoss } from "pg-boss";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
@@ -10,6 +10,112 @@ import type { Config } from "./config";
 import { createAdminGuard } from "./admin-auth";
 import { getJobRunById, listJobRuns, listSyncRuns, updateJobRunById, type DbPool } from "./db";
 import { buildSyncPlaylistJobOptions } from "./queue";
+
+type YoutubeAccountRow = {
+  id: string;
+  user_id: string;
+  provider: string;
+  scope: string | null;
+  token_type: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  access_token: string | null;
+  refresh_token: string | null;
+};
+
+type YoutubeAccountSummary = {
+  id: string;
+  provider: string;
+  scope: string | null;
+  token_type: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  has_access_token: boolean;
+  has_refresh_token: boolean;
+};
+
+type SystemUserRow = {
+  id: string;
+  email: string | null;
+  created_at: string;
+  last_sign_in_at: string | null;
+  youtube_accounts: YoutubeAccountSummary[];
+};
+
+function parseTimestamp(value: string | null | undefined) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function buildAccountSummary(row: YoutubeAccountRow): YoutubeAccountSummary {
+  return {
+    id: row.id,
+    provider: row.provider,
+    scope: row.scope ?? null,
+    token_type: row.token_type ?? null,
+    expires_at: row.expires_at ?? null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    has_access_token: Boolean(row.access_token),
+    has_refresh_token: Boolean(row.refresh_token)
+  };
+}
+
+async function listAllAuthUsers(supabase: SupabaseClient, perPage = 200) {
+  const users: User[] = [];
+  let page = 1;
+
+  while (true) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      throw error;
+    }
+
+    const batch = data?.users ?? [];
+    users.push(...batch);
+
+    if (batch.length < perPage) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return users;
+}
+
+async function listAllYoutubeAccounts(supabase: SupabaseClient, pageSize = 1000) {
+  const rows: YoutubeAccountRow[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("youtube_accounts")
+      .select(
+        "id,user_id,provider,scope,token_type,expires_at,created_at,updated_at,access_token,refresh_token"
+      )
+      .order("created_at", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) {
+      throw error;
+    }
+
+    const batch = (data ?? []) as YoutubeAccountRow[];
+    rows.push(...batch);
+
+    if (batch.length < pageSize) {
+      break;
+    }
+
+    offset += pageSize;
+  }
+
+  return rows;
+}
 
 export async function buildServer(params: {
   config: Config;
@@ -228,6 +334,36 @@ export async function buildServer(params: {
     }
 
     return { success: true };
+  });
+
+  app.get("/admin/system-users", { preHandler: requireAdmin }, async () => {
+    const [users, youtubeAccounts] = await Promise.all([
+      listAllAuthUsers(supabase),
+      listAllYoutubeAccounts(supabase)
+    ]);
+
+    const accountsByUser = new Map<string, YoutubeAccountSummary[]>();
+    for (const account of youtubeAccounts) {
+      const summary = buildAccountSummary(account);
+      const existing = accountsByUser.get(account.user_id);
+      if (existing) {
+        existing.push(summary);
+      } else {
+        accountsByUser.set(account.user_id, [summary]);
+      }
+    }
+
+    const rows: SystemUserRow[] = users.map((user) => ({
+      id: user.id,
+      email: user.email ?? null,
+      created_at: user.created_at,
+      last_sign_in_at: user.last_sign_in_at ?? null,
+      youtube_accounts: accountsByUser.get(user.id) ?? []
+    }));
+
+    rows.sort((a, b) => parseTimestamp(b.created_at) - parseTimestamp(a.created_at));
+
+    return { rows };
   });
 
   // SPA 回退路由：所有非 API 路由都返回 index.html

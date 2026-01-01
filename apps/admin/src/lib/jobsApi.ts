@@ -19,6 +19,26 @@ async function request<T>(path: string, token: string, options?: RequestInit): P
   return (await response.json()) as T;
 }
 
+export type YoutubeAccountSummary = {
+  id: string;
+  provider: string;
+  scope: string | null;
+  token_type: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  has_access_token: boolean;
+  has_refresh_token: boolean;
+};
+
+export type SystemUserRow = {
+  id: string;
+  email: string | null;
+  created_at: string;
+  last_sign_in_at: string | null;
+  youtube_accounts: YoutubeAccountSummary[];
+};
+
 export function kickoff(token: string) {
   return request<{ bossJobId: string | null }>("/admin/kickoff-sync", token, { method: "POST" });
 }
@@ -81,4 +101,8 @@ export function removeAdminUser(token: string, userId: string) {
       method: "DELETE"
     }
   );
+}
+
+export function fetchSystemUsers(token: string) {
+  return request<{ rows: SystemUserRow[] }>("/admin/system-users", token);
 }
