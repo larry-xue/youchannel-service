@@ -1,4 +1,4 @@
-﻿# YouChannel Service
+# YouChannel Service
 
 Monorepo layout:
 - apps/jobs: jobs service (Fastify + pg-boss)
@@ -12,5 +12,5 @@ Quick start:
 4) pnpm -C apps/admin dev
 
 Database:
-- Apply `packages/core/sql/schema.sql` to the Supabase project.
+- Migrations are in `supabase/migrations/`. Apply them to your Supabase project.
 - RLS keeps `sync_runs` and `job_runs` service-role only; admin UI uses the jobs API.
