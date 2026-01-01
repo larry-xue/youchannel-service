@@ -128,7 +128,7 @@ async function start() {
   await scheduleKickoff(boss, configObj, logger);
 
   const app = await buildServer({ config: configObj, logger, boss, db, supabase });
-  await app.listen({ port: configObj.port, host: "0.0.0.0" });
+  await app.listen({ port: configObj.port });
 
   logger.info({ port: configObj.port }, "Jobs service running");
 
