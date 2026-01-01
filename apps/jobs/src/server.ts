@@ -5,7 +5,8 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import type { Config } from "./config";
 import { createAdminGuard } from "./admin-auth";
-import { listJobRuns, listSyncRuns, type DbPool } from "./db";
+import { getJobRunById, listJobRuns, listSyncRuns, updateJobRunById, type DbPool } from "./db";
+import { buildSyncPlaylistJobOptions } from "./queue";
 
 export async function buildServer(params: {
   config: Config;
@@ -26,9 +27,9 @@ export async function buildServer(params: {
 
   app.get("/health", async () => ({ ok: true }));
 
-  app.post("/admin/kickoff", { preHandler: requireAdmin }, async (request) => {
-    const bossJobId = await boss.publish("kickoff", {
-      source: "manual",
+  app.post("/admin/kickoff-sync", { preHandler: requireAdmin }, async (request) => {
+    const bossJobId = await boss.send("kickoff", {
+      source: "admin-manual",
       requestedBy: request.adminUser?.id
     });
 
@@ -41,14 +42,56 @@ export async function buildServer(params: {
     return { rows };
   });
 
-  app.get("/admin/job-runs", { preHandler: requireAdmin }, async (request) => {
-    const query = request.query as { syncRunId?: string; limit?: string };
-    const limit = Number(query.limit ?? 50);
+  app.get("/admin/sync-runs/:id/job-runs", { preHandler: requireAdmin }, async (request) => {
+    const params = request.params as { id: string };
+    const limit = Number((request.query as { limit?: string }).limit ?? 50);
     const rows = await listJobRuns(db, {
-      syncRunId: query.syncRunId,
+      syncRunId: params.id,
       limit: Number.isFinite(limit) ? limit : 50
     });
     return { rows };
+  });
+
+  app.post("/admin/job-runs/:id/retry", { preHandler: requireAdmin }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const jobRun = await getJobRunById(db, params.id);
+
+    if (!jobRun) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    if (!jobRun.playlist_id) {
+      reply.code(400);
+      return { error: "missing_playlist" };
+    }
+
+    const bossJobId = await boss.send(
+      "sync:playlist",
+      {
+        syncRunId: jobRun.sync_run_id,
+        playlistId: jobRun.playlist_id,
+        userId: jobRun.user_id,
+        jobRunId: jobRun.id
+      },
+      buildSyncPlaylistJobOptions(jobRun.playlist_id)
+    );
+
+    if (!bossJobId) {
+      reply.code(409);
+      return { error: "deduped" };
+    }
+
+    await updateJobRunById(db, jobRun.id, {
+      status: "queued",
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+      result: null,
+      bossJobId
+    });
+
+    return { bossJobId };
   });
 
   // Admin users management

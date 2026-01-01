@@ -1,5 +1,5 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { kickoff, fetchSyncRuns } from "../lib/jobsApi";
+﻿import { useMutation, useQuery } from "@tanstack/react-query";
+import { fetchJobRuns, fetchSyncRuns, kickoff, retryJobRun } from "../lib/jobsApi";
 import { useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { Button } from "./ui/button";
@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Badge } from "./ui/badge";
 import { Skeleton } from "./ui/skeleton";
 import { Activity, AlertTriangle, CheckCircle2, Clock, LogOut, Play, RefreshCw, Users } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AdminUsers } from "./AdminUsers";
 
 function formatTime(value: string | null | undefined) {
@@ -19,12 +19,69 @@ function formatTime(value: string | null | undefined) {
   return date.toLocaleString();
 }
 
+function formatDurationMs(value: number | null | undefined) {
+  if (!value || !Number.isFinite(value)) return "-";
+  if (value < 1000) return `${Math.round(value)}ms`;
+  const totalSeconds = Math.round(value / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function toNumber(value: unknown) {
+  const num = Number(value ?? 0);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function deriveRunStatus(row: Record<string, unknown>) {
+  const total = toNumber(row.job_total);
+  if (!total) return String(row.status ?? "unknown");
+  const queued = toNumber(row.job_queued);
+  const running = toNumber(row.job_running);
+  const failed = toNumber(row.job_failed);
+  const succeeded = toNumber(row.job_succeeded);
+  const skipped = toNumber(row.job_skipped);
+
+  if (queued + running > 0) return "running";
+  if (failed > 0) return succeeded + skipped > 0 ? "partial" : "failed";
+  return "succeeded";
+}
+
+function getResultNumber(result: Record<string, unknown> | null, key: string) {
+  return toNumber(result?.[key]);
+}
+
+function getRowDurationMs(row: Record<string, unknown>) {
+  const result = (row.result as Record<string, unknown> | null) ?? null;
+  const durationMs = toNumber(result?.durationMs);
+  if (durationMs) return durationMs;
+  const started = typeof row.started_at === "string" ? new Date(row.started_at) : null;
+  const finished = typeof row.finished_at === "string" ? new Date(row.finished_at) : null;
+  if (!started || !finished) return null;
+  if (Number.isNaN(started.getTime()) || Number.isNaN(finished.getTime())) return null;
+  return finished.getTime() - started.getTime();
+}
+
+function getRunDurationMs(row: Record<string, unknown> | undefined) {
+  if (!row) return null;
+  const startedRaw = (row.job_started_at ?? row.started_at) as string | null | undefined;
+  const finishedRaw = (row.job_finished_at ?? row.finished_at) as string | null | undefined;
+  if (!startedRaw || !finishedRaw) return null;
+  const started = new Date(startedRaw);
+  const finished = new Date(finishedRaw);
+  if (Number.isNaN(started.getTime()) || Number.isNaN(finished.getTime())) return null;
+  return finished.getTime() - started.getTime();
+}
+
 function StatusBadge({ status }: { status: string }) {
   const variantMap: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
     queued: "outline",
     running: "default",
     succeeded: "secondary",
     failed: "destructive",
+    partial: "secondary",
+    skipped: "outline"
   };
 
   return (
@@ -40,6 +97,7 @@ export function Dashboard() {
   const { session } = useAuth();
   const token = session?.access_token;
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   const syncRunsQuery = useQuery({
     queryKey: ["sync-runs"],
@@ -52,30 +110,90 @@ export function Dashboard() {
     onSuccess: () => syncRunsQuery.refetch()
   });
 
+  const retryMutation = useMutation({
+    mutationFn: (jobRunId: string) => retryJobRun(token ?? "", jobRunId),
+    onSuccess: () => {
+      syncRunsQuery.refetch();
+      jobRunsQuery.refetch();
+    }
+  });
+
   const rows = syncRunsQuery.data?.rows ?? [];
   const totalRuns = rows.length;
+
+  useEffect(() => {
+    if (!rows.length) {
+      setSelectedRunId(null);
+      return;
+    }
+    const firstId = typeof rows[0]?.id === "string" ? rows[0].id : null;
+    if (!selectedRunId || !rows.some((row) => row.id === selectedRunId)) {
+      setSelectedRunId(firstId);
+    }
+  }, [rows, selectedRunId]);
+
+  const jobRunsQuery = useQuery({
+    queryKey: ["job-runs", selectedRunId],
+    enabled: Boolean(token) && activeTab === "dashboard" && Boolean(selectedRunId),
+    queryFn: () => fetchJobRuns(token ?? "", selectedRunId ?? "", 200)
+  });
+
   const counts = rows.reduce(
+    (acc, row) => {
+      const status = deriveRunStatus(row);
+      if (status === "queued") acc.queued += 1;
+      if (status === "running") acc.running += 1;
+      if (status === "succeeded") acc.succeeded += 1;
+      if (status === "failed") acc.failed += 1;
+      if (status === "partial") acc.partial += 1;
+      return acc;
+    },
+    { queued: 0, running: 0, succeeded: 0, failed: 0, partial: 0 }
+  );
+
+  const activeRuns = counts.queued + counts.running;
+  const failedRuns = counts.failed + counts.partial;
+  const successRate = totalRuns ? Math.round((counts.succeeded / totalRuns) * 100) : 0;
+  const failureRate = totalRuns ? Math.round((failedRuns / totalRuns) * 100) : 0;
+  const latestRun = rows[0] as Record<string, unknown> | undefined;
+  const latestStatus = latestRun ? deriveRunStatus(latestRun) : "unknown";
+  const latestRunId = typeof latestRun?.id === "string" ? latestRun.id : undefined;
+  const latestSource = typeof latestRun?.kickoff_source === "string" ? latestRun.kickoff_source : undefined;
+  const latestCreatedAt = typeof latestRun?.created_at === "string" ? latestRun.created_at : undefined;
+  const latestStartedAt = typeof latestRun?.started_at === "string" ? latestRun.started_at : undefined;
+  const latestFinishedAt = typeof latestRun?.finished_at === "string" ? latestRun.finished_at : undefined;
+  const latestDurationMs = getRunDurationMs(latestRun);
+  const latestJobTotal = toNumber(latestRun?.job_total);
+  const latestJobFailed = toNumber(latestRun?.job_failed);
+  const latestJobSucceeded = toNumber(latestRun?.job_succeeded);
+  const latestJobSkipped = toNumber(latestRun?.job_skipped);
+
+  const jobRows = jobRunsQuery.data?.rows ?? [];
+  const jobCounts = jobRows.reduce(
     (acc, row) => {
       const status = String(row.status ?? "");
       if (status === "queued") acc.queued += 1;
       if (status === "running") acc.running += 1;
       if (status === "succeeded") acc.succeeded += 1;
       if (status === "failed") acc.failed += 1;
+      if (status === "skipped") acc.skipped += 1;
       return acc;
     },
-    { queued: 0, running: 0, succeeded: 0, failed: 0 }
+    { queued: 0, running: 0, succeeded: 0, failed: 0, skipped: 0 }
   );
 
-  const activeRuns = counts.queued + counts.running;
-  const successRate = totalRuns ? Math.round((counts.succeeded / totalRuns) * 100) : 0;
-  const failureRate = totalRuns ? Math.round((counts.failed / totalRuns) * 100) : 0;
-  const latestRun = rows[0] as Record<string, unknown> | undefined;
-  const latestStatus = typeof latestRun?.status === "string" ? latestRun.status : "unknown";
-  const latestRunId = typeof latestRun?.id === "string" ? latestRun.id : undefined;
-  const latestSource = typeof latestRun?.kickoff_source === "string" ? latestRun.kickoff_source : undefined;
-  const latestCreatedAt = typeof latestRun?.created_at === "string" ? latestRun.created_at : undefined;
-  const latestStartedAt = typeof latestRun?.started_at === "string" ? latestRun.started_at : undefined;
-  const latestFinishedAt = typeof latestRun?.finished_at === "string" ? latestRun.finished_at : undefined;
+  const jobTotals = jobRows.reduce(
+    (acc, row) => {
+      const result = (row.result as Record<string, unknown> | null) ?? null;
+      acc.fetched += getResultNumber(result, "fetchedCount");
+      acc.newCount += getResultNumber(result, "newCount");
+      acc.removed += getResultNumber(result, "removedCount");
+      acc.analysesEnqueued += getResultNumber(result, "analysesEnqueued");
+      acc.analysesSkipped += getResultNumber(result, "analysesSkipped");
+      return acc;
+    },
+    { fetched: 0, newCount: 0, removed: 0, analysesEnqueued: 0, analysesSkipped: 0 }
+  );
 
   const summaryCards = [
     {
@@ -98,7 +216,7 @@ export function Dashboard() {
     },
     {
       label: "Failed runs",
-      value: totalRuns ? counts.failed : 0,
+      value: totalRuns ? failedRuns : 0,
       detail: totalRuns ? `${failureRate}% of recent runs` : "No recent failures",
       icon: AlertTriangle
     }
@@ -242,87 +360,231 @@ export function Dashboard() {
             </div>
 
             <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-              <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
-                <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <CardTitle>Recent Sync Runs</CardTitle>
-                    <CardDescription>View the history of sync job executions</CardDescription>
-                  </div>
-                  <Badge variant="secondary">{totalRuns} runs</Badge>
-                </CardHeader>
-                <CardContent>
-                  {syncRunsQuery.isLoading ? (
-                    <div className="space-y-3">
-                      <Skeleton className="h-10 w-full" />
-                      <Skeleton className="h-10 w-full" />
-                      <Skeleton className="h-10 w-full" />
+              <div className="space-y-6">
+                <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
+                  <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <CardTitle>Recent Sync Runs</CardTitle>
+                      <CardDescription>View the history of sync job executions</CardDescription>
                     </div>
-                  ) : syncRunsQuery.error ? (
-                    <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
-                      <AlertDescription>
-                        Failed to load runs: {String(syncRunsQuery.error)}
-                      </AlertDescription>
-                    </Alert>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                            ID
-                          </TableHead>
-                          <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                            Status
-                          </TableHead>
-                          <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                            Source
-                          </TableHead>
-                          <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                            Created
-                          </TableHead>
-                          <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                            Started
-                          </TableHead>
-                          <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                            Finished
-                          </TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {syncRunsQuery.data?.rows?.length ? (
-                          syncRunsQuery.data.rows.map((row) => (
-                            <TableRow key={row.id as string}>
-                              <TableCell className="font-mono text-xs text-muted-foreground">
-                                {(row.id as string).slice(0, 8)}...
-                              </TableCell>
-                              <TableCell>
-                                <StatusBadge status={row.status as string} />
-                              </TableCell>
-                              <TableCell className="text-sm">
-                                {row.kickoff_source as string}
-                              </TableCell>
-                              <TableCell className="text-sm">
-                                {formatTime(row.created_at as string)}
-                              </TableCell>
-                              <TableCell className="text-sm">
-                                {formatTime(row.started_at as string)}
-                              </TableCell>
-                              <TableCell className="text-sm">
-                                {formatTime(row.finished_at as string)}
+                    <Badge variant="secondary">{totalRuns} runs</Badge>
+                  </CardHeader>
+                  <CardContent>
+                    {syncRunsQuery.isLoading ? (
+                      <div className="space-y-3">
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                      </div>
+                    ) : syncRunsQuery.error ? (
+                      <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
+                        <AlertDescription>
+                          Failed to load runs: {String(syncRunsQuery.error)}
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                              ID
+                            </TableHead>
+                            <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                              Status
+                            </TableHead>
+                            <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                              Jobs
+                            </TableHead>
+                            <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                              Source
+                            </TableHead>
+                            <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                              Created
+                            </TableHead>
+                            <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                              Started
+                            </TableHead>
+                            <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                              Finished
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {syncRunsQuery.data?.rows?.length ? (
+                            syncRunsQuery.data.rows.map((row) => {
+                              const rowId = row.id as string;
+                              const derivedStatus = deriveRunStatus(row);
+                              const totalJobs = toNumber(row.job_total);
+                              const failedJobs = toNumber(row.job_failed);
+                              const isSelected = rowId === selectedRunId;
+                              return (
+                                <TableRow
+                                  key={rowId}
+                                  onClick={() => setSelectedRunId(rowId)}
+                                  className={isSelected ? "bg-muted/40" : "cursor-pointer hover:bg-muted/30"}
+                                >
+                                  <TableCell className="font-mono text-xs text-muted-foreground">
+                                    {rowId.slice(0, 8)}...
+                                  </TableCell>
+                                  <TableCell>
+                                    <StatusBadge status={derivedStatus} />
+                                  </TableCell>
+                                  <TableCell className="text-sm text-muted-foreground">
+                                    {totalJobs ? `${totalJobs} total` : "-"}{failedJobs ? ` / ${failedJobs} failed` : ""}
+                                  </TableCell>
+                                  <TableCell className="text-sm">
+                                    {row.kickoff_source as string}
+                                  </TableCell>
+                                  <TableCell className="text-sm">
+                                    {formatTime(row.created_at as string)}
+                                  </TableCell>
+                                  <TableCell className="text-sm">
+                                    {formatTime(row.started_at as string)}
+                                  </TableCell>
+                                  <TableCell className="text-sm">
+                                    {formatTime(row.finished_at as string)}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                                No sync runs yet. Kick one off to begin.
                               </TableCell>
                             </TableRow>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                              No sync runs yet. Kick one off to begin.
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  )}
-                </CardContent>
-              </Card>
+                          )}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
+                  <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <CardTitle>Job Runs</CardTitle>
+                      <CardDescription>
+                        {selectedRunId ? `Run ${selectedRunId.slice(0, 8)}...` : "Select a run to inspect jobs"}
+                      </CardDescription>
+                    </div>
+                    <Badge variant="secondary">{jobRows.length} jobs</Badge>
+                  </CardHeader>
+                  <CardContent>
+                    {jobRunsQuery.isLoading ? (
+                      <div className="space-y-3">
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                      </div>
+                    ) : jobRunsQuery.error ? (
+                      <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
+                        <AlertDescription>
+                          Failed to load job runs: {String(jobRunsQuery.error)}
+                        </AlertDescription>
+                      </Alert>
+                    ) : jobRows.length ? (
+                      <>
+                        <div className="mb-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                          <span>{jobCounts.succeeded} succeeded</span>
+                          <span>{jobCounts.failed} failed</span>
+                          <span>{jobCounts.running} running</span>
+                          <span>{jobCounts.queued} queued</span>
+                          <span>{jobCounts.skipped} skipped</span>
+                          <span>+{jobTotals.newCount} new</span>
+                          <span>-{jobTotals.removed} removed</span>
+                          <span>{jobTotals.fetched} fetched</span>
+                          <span>{jobTotals.analysesEnqueued} analyses queued</span>
+                        </div>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Playlist
+                              </TableHead>
+                              <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Status
+                              </TableHead>
+                              <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Attempt
+                              </TableHead>
+                              <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Duration
+                              </TableHead>
+                              <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Counts
+                              </TableHead>
+                              <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Error
+                              </TableHead>
+                              <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Action
+                              </TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {jobRows.map((row) => {
+                              const result = (row.result as Record<string, unknown> | null) ?? null;
+                              const playlistId = typeof row.playlist_id === "string" ? row.playlist_id : "-";
+                              const fetched = getResultNumber(result, "fetchedCount");
+                              const newCount = getResultNumber(result, "newCount");
+                              const removed = getResultNumber(result, "removedCount");
+                              const analysesQueued = getResultNumber(result, "analysesEnqueued");
+                              const analysesSkipped = getResultNumber(result, "analysesSkipped");
+                              const durationMs = getRowDurationMs(row);
+                              const status = String(row.status ?? "");
+                              const httpStatus = toNumber(result?.httpStatus);
+                              const error = row.error
+                                ? String(row.error)
+                                : httpStatus
+                                  ? `HTTP ${httpStatus}`
+                                  : "-";
+                              const canRetry = status === "failed";
+                              const isRetrying = retryMutation.isPending && retryMutation.variables === row.id;
+
+                              return (
+                                <TableRow key={row.id as string}>
+                                  <TableCell className="font-mono text-xs text-muted-foreground">
+                                    {playlistId.slice(0, 8)}...
+                                  </TableCell>
+                                  <TableCell>
+                                    <StatusBadge status={status} />
+                                  </TableCell>
+                                  <TableCell className="text-sm">{row.attempt as number}</TableCell>
+                                  <TableCell className="text-sm">
+                                    {formatDurationMs(durationMs)}
+                                  </TableCell>
+                                  <TableCell className="text-xs text-muted-foreground">
+                                    <div>+{newCount} / -{removed} / {fetched}</div>
+                                    <div>{analysesQueued} queued / {analysesSkipped} skipped</div>
+                                  </TableCell>
+                                  <TableCell className="text-xs text-muted-foreground">
+                                    {error}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={!canRetry || isRetrying}
+                                      onClick={() => retryMutation.mutate(row.id as string)}
+                                    >
+                                      {isRetrying ? "Retrying..." : "Retry"}
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
+                        No jobs for the selected run yet.
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
 
               <div className="space-y-6">
                 <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
@@ -346,6 +608,16 @@ export function Dashboard() {
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-muted-foreground">Source</span>
                           <span>{latestSource ?? "-"}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Jobs</span>
+                          <span>
+                            {latestJobTotal ? `${latestJobSucceeded} ok / ${latestJobFailed} failed / ${latestJobSkipped} skipped` : "-"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Duration</span>
+                          <span>{formatDurationMs(latestDurationMs)}</span>
                         </div>
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-muted-foreground">Created</span>
@@ -386,6 +658,10 @@ export function Dashboard() {
                       <Badge variant="secondary">{counts.running}</Badge>
                     </div>
                     <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Partial</span>
+                      <Badge variant="outline">{counts.partial}</Badge>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground">Failed</span>
                       <Badge variant="outline">{counts.failed}</Badge>
                     </div>
@@ -414,3 +690,6 @@ export function Dashboard() {
     </div>
   );
 }
+
+
+

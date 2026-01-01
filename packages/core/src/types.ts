@@ -1,5 +1,5 @@
-﻿export type SyncRunStatus = "queued" | "running" | "succeeded" | "failed";
-export type JobRunStatus = "queued" | "running" | "succeeded" | "failed";
+﻿export type SyncRunStatus = "queued" | "running" | "succeeded" | "failed" | "partial";
+export type JobRunStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 
 export type SyncRunRow = {
   id: string;
@@ -14,6 +14,8 @@ export type SyncRunRow = {
 export type JobRunRow = {
   id: string;
   sync_run_id: string;
+  playlist_id: string | null;
+  user_id: string | null;
   job_name: string;
   status: JobRunStatus;
   boss_job_id: string | null;
@@ -24,3 +26,6 @@ export type JobRunRow = {
   error: string | null;
   result: Record<string, unknown> | null;
 };
+
+
+

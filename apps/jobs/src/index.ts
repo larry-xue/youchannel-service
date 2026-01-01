@@ -19,7 +19,7 @@ const supabase = buildSupabaseClient(config);
 
 async function start() {
   await boss.start();
-  await registerWorkers({ boss, db, logger });
+  await registerWorkers({ boss, db, logger, config });
   await scheduleKickoff(boss, config, logger);
 
   const app = await buildServer({ config, logger, boss, db, supabase });

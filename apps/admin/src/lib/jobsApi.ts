@@ -23,25 +23,31 @@ async function request<T>(path: string, token: string, options?: RequestInit): P
 }
 
 export function kickoff(token: string) {
-  return request<{ bossJobId: string }>("/admin/kickoff", token, { method: "POST" });
+  return request<{ bossJobId: string | null }>("/admin/kickoff-sync", token, { method: "POST" });
 }
 
 export function fetchSyncRuns(token: string, limit = 50) {
   return request<{ rows: Array<Record<string, unknown>> }>(`/admin/sync-runs?limit=${limit}`, token);
 }
 
-export function fetchJobRuns(token: string, params?: { syncRunId?: string; limit?: number }) {
+export function fetchJobRuns(token: string, syncRunId: string, limit = 50) {
   const searchParams = new URLSearchParams();
-  if (params?.syncRunId) {
-    searchParams.set("syncRunId", params.syncRunId);
+  if (limit) {
+    searchParams.set("limit", String(limit));
   }
-  if (params?.limit) {
-    searchParams.set("limit", String(params.limit));
-  }
-
   const suffix = searchParams.toString();
-  const path = suffix ? `/admin/job-runs?${suffix}` : "/admin/job-runs";
+  const path = suffix
+    ? `/admin/sync-runs/${syncRunId}/job-runs?${suffix}`
+    : `/admin/sync-runs/${syncRunId}/job-runs`;
   return request<{ rows: Array<Record<string, unknown>> }>(path, token);
+}
+
+export function retryJobRun(token: string, jobRunId: string) {
+  return request<{ bossJobId: string | null }>(
+    `/admin/job-runs/${jobRunId}/retry`,
+    token,
+    { method: "POST" }
+  );
 }
 
 export function fetchAdminUsers(token: string) {
