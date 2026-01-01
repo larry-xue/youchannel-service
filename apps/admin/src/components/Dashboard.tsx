@@ -99,6 +99,7 @@ export function Dashboard() {
   const token = session?.access_token;
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [runsPage, setRunsPage] = useState(1);
   const tabCopy: Record<Tab, { eyebrow: string; title: string; description: string }> = {
     dashboard: {
       eyebrow: "Operations",
@@ -139,6 +140,21 @@ export function Dashboard() {
 
   const rows = syncRunsQuery.data?.rows ?? [];
   const totalRuns = rows.length;
+  const runsPerPage = 5;
+  const totalRunPages = Math.max(1, Math.ceil(totalRuns / runsPerPage));
+  const runPageStart = (runsPage - 1) * runsPerPage;
+  const runPageEnd = runPageStart + runsPerPage;
+  const pagedRuns = rows.slice(runPageStart, runPageEnd);
+
+  useEffect(() => {
+    if (!totalRuns && runsPage !== 1) {
+      setRunsPage(1);
+      return;
+    }
+    if (runsPage > totalRunPages) {
+      setRunsPage(totalRunPages);
+    }
+  }, [runsPage, totalRunPages, totalRuns]);
 
   useEffect(() => {
     if (!rows.length) {
@@ -438,8 +454,8 @@ export function Dashboard() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {syncRunsQuery.data?.rows?.length ? (
-                            syncRunsQuery.data.rows.map((row) => {
+                          {totalRuns ? (
+                            pagedRuns.map((row) => {
                               const rowId = row.id as string;
                               const derivedStatus = deriveRunStatus(row);
                               const totalJobs = toNumber(row.job_total);
@@ -484,6 +500,34 @@ export function Dashboard() {
                           )}
                         </TableBody>
                       </Table>
+                    )}
+                    {!syncRunsQuery.isLoading && !syncRunsQuery.error && totalRuns > 0 && (
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                        <span>
+                          Showing {runPageStart + 1}-{Math.min(runPageEnd, totalRuns)} of {totalRuns}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setRunsPage((prev) => Math.max(1, prev - 1))}
+                            disabled={runsPage === 1}
+                          >
+                            Previous
+                          </Button>
+                          <span>
+                            Page {runsPage} of {totalRunPages}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setRunsPage((prev) => Math.min(totalRunPages, prev + 1))}
+                            disabled={runsPage === totalRunPages}
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
                     )}
                   </CardContent>
                 </Card>
