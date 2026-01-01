@@ -13,6 +13,7 @@ export function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [resetMode, setResetMode] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const cardClassName = "w-full max-w-md border-border/70 bg-card/80 shadow-xl backdrop-blur";
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -45,22 +46,22 @@ export function LoginForm() {
 
   if (resetSent) {
     return (
-      <Card className="w-full max-w-md">
+      <Card className={cardClassName}>
         <CardHeader>
           <CardTitle>Password Reset Email Sent</CardTitle>
           <CardDescription>
             Check your email for a password reset link
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Alert>
+        <CardContent className="space-y-4">
+          <Alert className="border-border/70 bg-muted/40">
             <AlertDescription>
               If an account exists with {email}, you will receive a password reset link.
             </AlertDescription>
           </Alert>
           <Button
             variant="outline"
-            className="w-full mt-4"
+            className="w-full"
             onClick={() => {
               setResetMode(false);
               setResetSent(false);
@@ -75,17 +76,17 @@ export function LoginForm() {
   }
 
   return (
-    <Card className="w-full max-w-md">
+    <Card className={cardClassName}>
       <CardHeader>
         <CardTitle>{resetMode ? "Reset Password" : "Admin Sign In"}</CardTitle>
         <CardDescription>
           {resetMode
             ? "Enter your email to receive a password reset link"
-            : "Enter your credentials to access the admin panel"}
+            : "Enter your credentials to access the admin console"}
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -95,6 +96,7 @@ export function LoginForm() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="admin@company.com"
+              autoComplete="email"
               disabled={loading}
             />
           </div>
@@ -107,13 +109,14 @@ export function LoginForm() {
                 required
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="••••••••"
+                placeholder="Enter your password"
+                autoComplete="current-password"
                 disabled={loading}
               />
             </div>
           )}
           {error && (
-            <Alert variant="destructive">
+            <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}

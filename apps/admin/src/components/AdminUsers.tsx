@@ -8,6 +8,7 @@ import { Label } from "./ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Skeleton } from "./ui/skeleton";
+import { Badge } from "./ui/badge";
 import { useState } from "react";
 import { Plus, Trash2, Loader2 } from "lucide-react";
 
@@ -95,8 +96,8 @@ export function AdminUsers() {
   };
 
   return (
-    <div className="space-y-6">
-      <Card>
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+      <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
         <CardHeader>
           <CardTitle>Add Admin User</CardTitle>
           <CardDescription>
@@ -110,30 +111,37 @@ export function AdminUsers() {
               <Input
                 id="email"
                 type="email"
-                placeholder="user@example.com"
+                placeholder="admin@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={addMutation.isPending}
                 required
               />
             </div>
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="createNew"
-                checked={createNew}
-                onChange={(e) => {
-                  setCreateNew(e.target.checked);
-                  if (!e.target.checked) {
-                    setPassword("");
-                  }
-                }}
-                disabled={addMutation.isPending}
-                className="h-4 w-4 rounded border-gray-300"
-              />
-              <Label htmlFor="createNew" className="text-sm font-normal cursor-pointer">
-                Create new user if doesn't exist
-              </Label>
+            <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 p-3">
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="createNew"
+                  checked={createNew}
+                  onChange={(e) => {
+                    setCreateNew(e.target.checked);
+                    if (!e.target.checked) {
+                      setPassword("");
+                    }
+                  }}
+                  disabled={addMutation.isPending}
+                  className="mt-1 h-4 w-4 rounded border-input text-primary focus-visible:ring-2 focus-visible:ring-ring/40"
+                />
+                <div>
+                  <Label htmlFor="createNew" className="text-sm font-medium">
+                    Create new user if missing
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Enable this to create a new account and set an initial password.
+                  </p>
+                </div>
+              </div>
             </div>
             {createNew && (
               <div className="space-y-2">
@@ -141,32 +149,32 @@ export function AdminUsers() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="Enter password for new user"
+                  placeholder="Set a temporary password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={addMutation.isPending}
                   required={createNew}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Minimum 6 characters. Use a strong password for security.
+                  Minimum 6 characters. Ask the user to rotate it after first login.
                 </p>
               </div>
             )}
             <Button type="submit" className="w-full" disabled={addMutation.isPending}>
               {addMutation.isPending ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   {createNew ? "Creating..." : "Adding..."}
                 </>
               ) : (
                 <>
-                  <Plus className="mr-2 h-4 w-4" />
-                  {createNew ? "Create & Add" : "Add"}
+                  <Plus className="h-4 w-4" />
+                  {createNew ? "Create & Add" : "Add Admin"}
                 </>
               )}
             </Button>
             {error && (
-              <Alert variant="destructive">
+              <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
@@ -174,12 +182,17 @@ export function AdminUsers() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Admin Users</CardTitle>
-          <CardDescription>
-            List of all users with administrator access
-          </CardDescription>
+      <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
+        <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle>Admin Users</CardTitle>
+            <CardDescription>
+              List of all users with administrator access
+            </CardDescription>
+          </div>
+          <Badge variant="secondary">
+            {adminUsersQuery.data?.rows?.length ?? 0} admins
+          </Badge>
         </CardHeader>
         <CardContent>
           {adminUsersQuery.isLoading ? (
@@ -189,7 +202,7 @@ export function AdminUsers() {
               <Skeleton className="h-10 w-full" />
             </div>
           ) : adminUsersQuery.error ? (
-            <Alert variant="destructive">
+            <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
               <AlertDescription>
                 Failed to load admin users: {String(adminUsersQuery.error)}
               </AlertDescription>
@@ -198,38 +211,66 @@ export function AdminUsers() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>User ID</TableHead>
-                  <TableHead>Added At</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Email
+                  </TableHead>
+                  <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                    User ID
+                  </TableHead>
+                  <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Added At
+                  </TableHead>
+                  <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Role
+                  </TableHead>
+                  <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Actions
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {adminUsersQuery.data?.rows?.length ? (
-                  adminUsersQuery.data.rows.map((row) => (
-                    <TableRow key={row.user_id}>
-                      <TableCell className="font-medium">
-                        {row.email || "(no email)"}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {row.user_id.slice(0, 8)}...
-                      </TableCell>
-                      <TableCell>{formatTime(row.created_at)}</TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemove(row.user_id)}
-                          disabled={removeMutation.isPending || row.user_id === session?.user.id}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  adminUsersQuery.data.rows.map((row) => {
+                    const isCurrentUser = row.user_id === session?.user.id;
+                    return (
+                      <TableRow key={row.user_id}>
+                        <TableCell className="font-medium">
+                          {row.email || "(no email)"}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {row.user_id.slice(0, 8)}...
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {formatTime(row.created_at)}
+                        </TableCell>
+                        <TableCell>
+                          {isCurrentUser ? (
+                            <Badge variant="secondary">You</Badge>
+                          ) : (
+                            <Badge variant="outline">Admin</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemove(row.user_id)}
+                            disabled={removeMutation.isPending || isCurrentUser}
+                            aria-label={
+                              isCurrentUser
+                                ? "Cannot remove your own access"
+                                : "Remove admin user"
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                       No admin users found
                     </TableCell>
                   </TableRow>
