@@ -14,6 +14,7 @@ if (result.error && !result.parsed) {
 
 import { PgBoss } from "pg-boss";
 import type { Logger } from "pino";
+import type { Config } from "./config";
 import { loadConfig } from "./config";
 import { buildLogger } from "./logger";
 import { initSentry } from "./sentry";
@@ -82,8 +83,8 @@ function normalizeDatabaseUrl(databaseUrl: string, logger: Logger) {
   return databaseUrl;
 }
 
-let configObj;
-let logger;
+let configObj: Config;
+let logger: Logger;
 
 try {
   configObj = loadConfig();

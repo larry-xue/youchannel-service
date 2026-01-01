@@ -296,7 +296,7 @@ export async function registerWorkers(params: {
   await boss.createQueue("kickoff");
   await boss.createQueue("sync.playlist");
 
-  await boss.work("kickoff", async (job) => {
+  await boss.work("kickoff", async (job: any) => {
     const kickoffSource = (job.data as { source?: string } | null)?.source ?? "schedule";
     const requestedBy = (job.data as { requestedBy?: string } | null)?.requestedBy ?? null;
 
