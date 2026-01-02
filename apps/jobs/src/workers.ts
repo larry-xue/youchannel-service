@@ -1,5 +1,7 @@
 import type { JobWithMetadata, PgBoss } from "pg-boss";
 import type { Logger } from "pino";
+import { chat, type StreamChunk } from "@tanstack/ai";
+import { createGeminiChat } from "@tanstack/ai-gemini";
 import { captureException } from "./sentry.js";
 import type { Config } from "./config.js";
 import {
@@ -27,8 +29,76 @@ import {
 const VIDEO_UPSERT_CHUNK_SIZE = 100;
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
 const ANALYSIS_MAX_DURATION_SEC = 3600;
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const ANALYSIS_PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
+const ANALYSIS_SUMMARY_MIN_LENGTH = 20;
+const ANALYSIS_TIMESTAMP_PATTERN = "^\\d{2}:\\d{2}$|^\\d{1,2}:\\d{2}:\\d{2}$";
+const ANALYSIS_TIMESTAMP_REGEX = /^(?:\d{2}:\d{2}|\d{1,2}:\d{2}:\d{2})$/;
+const ANALYSIS_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    summarize: {
+      type: "string",
+      minLength: ANALYSIS_SUMMARY_MIN_LENGTH,
+      description: "Concise 3-6 sentence summary of the video."
+    },
+    wiki: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          timestamp: {
+            type: "string",
+            pattern: ANALYSIS_TIMESTAMP_PATTERN,
+            description: "Timestamp in MM:SS or H:MM:SS."
+          },
+          title: {
+            type: "string",
+            minLength: 1,
+            description: "Section title."
+          },
+          details: {
+            type: "string",
+            minLength: 1,
+            description: "1-3 sentences describing what happens at this time."
+          }
+        },
+        required: ["timestamp", "title", "details"]
+      }
+    }
+  },
+  required: ["summarize", "wiki"]
+};
 
+const ANALYSIS_PROMPT_BASE = [
+  "You are analyzing a YouTube video based on its transcript and metadata.",
+  "Return ONLY a valid JSON object (RFC 8259). Use double quotes for all keys and strings.",
+  "The JSON must match exactly this schema: {\"summarize\": string, \"wiki\": [{\"timestamp\": string, \"title\": string, \"details\": string}]}",
+  "Do not include any extra keys, comments, or surrounding text.",
+  "\"summarize\" must be 3-6 sentences covering the main thesis and key takeaways (no bullet points).",
+  "\"wiki\" must be chronological (non-decreasing timestamps) and have 6-12 items when possible.",
+  "Each \"timestamp\" must match ^\\d{2}:\\d{2}$ or ^\\d{1,2}:\\d{2}:\\d{2}$.",
+  "Each \"details\" should be 1-3 sentences with concrete points from that segment; do not repeat the summary verbatim.",
+  "Use the same language as the video or the user's prompt.",
+  "Do not invent facts. If the transcript is unclear for a segment, say so in \"details\" without adding new fields."
+].join("\n");
+
+const ANALYSIS_STATUS = {
+  pending: "pending",
+  processing: "processing",
+  completed: "completed",
+  failed: "failed",
+  skipped: "skipped"
+} as const;
+
+type AnalysisStatus = (typeof ANALYSIS_STATUS)[keyof typeof ANALYSIS_STATUS];
+
+const ANALYSIS_MUTABLE_STATUSES: AnalysisStatus[] = [
+  ANALYSIS_STATUS.pending,
+  ANALYSIS_STATUS.failed
+];
 type SyncPlaylistPayload = {
   syncRunId: string;
   playlistId: string;
@@ -68,8 +138,20 @@ type VideoAnalysisTarget = {
 
 type AnalysisRecord = {
   id: string;
-  status: string;
+  status: AnalysisStatus;
+  updated_at: string | null;
 };
+
+type AnalysisOutput = {
+  summarize: string;
+  wiki: Array<{
+    timestamp: string;
+    title: string;
+    details: string;
+  }>;
+};
+
+type GeminiModel = Parameters<typeof createGeminiChat>[0];
 
 function pickThumbnailUrl(thumbnails?: Record<string, { url?: string }>) {
   const order = ["maxres", "standard", "high", "medium", "default"];
@@ -93,22 +175,192 @@ function shouldRefreshAccessToken(accessToken: string | null, expiresAt: string 
 }
 
 function parseDurationToSeconds(value?: string | null) {
-  if (!value) return 0;
+  if (!value) return null;
   const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(value);
-  if (!match) return 0;
+  if (!match) return null;
   const hours = Number(match[1] ?? 0);
   const minutes = Number(match[2] ?? 0);
   const seconds = Number(match[3] ?? 0);
   return hours * 3600 + minutes * 60 + seconds;
 }
 
-function buildAnalysisInput(video: VideoAnalysisTarget, prompt: string) {
-  const lines: string[] = ["Instruction:", prompt, "", "Video metadata:"];
-  if (video.title) lines.push(`Title: ${video.title}`);
-  if (video.description) lines.push(`Description: ${video.description}`);
-  if (video.duration) lines.push(`Duration: ${video.duration}`);
-  lines.push(`YouTube ID: ${video.youtube_video_id}`);
-  return lines.join("\n");
+function buildAnalysisPrompt(prompt: string) {
+  const trimmed = prompt.trim();
+  if (!trimmed) return ANALYSIS_PROMPT_BASE;
+  return `${ANALYSIS_PROMPT_BASE}\n\nAdditional focus:\n${trimmed}`;
+}
+
+function buildYoutubeVideoUrl(videoId: string) {
+  return `https://www.youtube.com/watch?v=${videoId}`;
+}
+
+function stripJsonFences(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("```")) return trimmed;
+  return trimmed
+    .replace(/^```[a-z]*\n?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+}
+
+function parseTimestampToSeconds(value: string) {
+  const trimmed = value.trim();
+  if (!ANALYSIS_TIMESTAMP_REGEX.test(trimmed)) return null;
+
+  let hours = 0;
+  let minutes = 0;
+  let seconds = 0;
+
+  const shortMatch = /^(\d{2}):(\d{2})$/.exec(trimmed);
+  if (shortMatch) {
+    minutes = Number(shortMatch[1]);
+    seconds = Number(shortMatch[2]);
+  } else {
+    const longMatch = /^(\d{1,2}):(\d{2}):(\d{2})$/.exec(trimmed);
+    if (!longMatch) return null;
+    hours = Number(longMatch[1]);
+    minutes = Number(longMatch[2]);
+    seconds = Number(longMatch[3]);
+  }
+
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || !Number.isFinite(hours)) {
+    return null;
+  }
+
+  if (minutes >= 60 || seconds >= 60 || minutes < 0 || seconds < 0 || hours < 0) {
+    return null;
+  }
+
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function isValidAnalysisOutput(value: unknown): value is AnalysisOutput {
+  if (!value || typeof value !== "object") return false;
+  const record = value as AnalysisOutput;
+  if (typeof record.summarize !== "string") return false;
+
+  const summary = record.summarize.trim();
+  if (!summary) return false;
+  if (summary.length < ANALYSIS_SUMMARY_MIN_LENGTH) return false;
+
+  if (!Array.isArray(record.wiki) || record.wiki.length === 0) return false;
+
+  let lastSeconds: number | null = null;
+  for (const item of record.wiki) {
+    if (!item || typeof item !== "object") return false;
+    const timestamp = item.timestamp?.trim();
+    const title = item.title?.trim();
+    const details = item.details?.trim();
+
+    if (!timestamp || !title || !details) return false;
+
+    const seconds = parseTimestampToSeconds(timestamp);
+    if (seconds === null) return false;
+    if (lastSeconds !== null && seconds < lastSeconds) return false;
+    lastSeconds = seconds;
+  }
+
+  return true;
+}
+
+function parseAnalysisOutput(rawText: string) {
+  const cleaned = stripJsonFences(rawText);
+  if (!cleaned) {
+    throw new Error("Gemini response was empty");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (error) {
+    throw new Error(
+      `Failed to parse Gemini JSON: ${error instanceof Error ? error.message : "unknown_error"}`
+    );
+  }
+  if (!isValidAnalysisOutput(parsed)) {
+    throw new Error("Gemini JSON did not match expected schema");
+  }
+  return parsed;
+}
+
+async function collectStream(stream: AsyncIterable<StreamChunk>) {
+  let content = "";
+  let usage: Record<string, unknown> | null = null;
+  let errorMessage: string | null = null;
+
+  for await (const chunk of stream) {
+    if (chunk.type === "content" && chunk.delta) {
+      content += chunk.delta;
+    }
+    if (chunk.type === "done") {
+      usage = chunk.usage ?? null;
+    }
+    if (chunk.type === "error") {
+      errorMessage = chunk.error?.message ?? "Gemini error";
+    }
+  }
+
+  if (errorMessage) {
+    throw new Error(errorMessage);
+  }
+
+  return { content: content.trim(), usage };
+}
+
+function parseTimestampToMs(value?: string | null) {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function isProcessingStale(record: AnalysisRecord | null) {
+  if (!record || record.status !== ANALYSIS_STATUS.processing) return false;
+  const updatedAtMs = parseTimestampToMs(record.updated_at);
+  if (updatedAtMs === null) return false;
+  return Date.now() - updatedAtMs > ANALYSIS_PROCESSING_TIMEOUT_MS;
+}
+
+const RETRYABLE_ERROR_CODES = new Set([
+  "ETIMEDOUT",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EAI_AGAIN",
+  "ENETUNREACH"
+]);
+
+function extractErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const record = error as {
+    status?: number;
+    statusCode?: number;
+    code?: number | string;
+    cause?: unknown;
+  };
+  if (typeof record.status === "number") return record.status;
+  if (typeof record.statusCode === "number") return record.statusCode;
+  if (typeof record.code === "number") return record.code;
+  if (record.cause && typeof record.cause === "object") {
+    const causeStatus = extractErrorStatus(record.cause);
+    if (typeof causeStatus === "number") return causeStatus;
+  }
+  return null;
+}
+
+function extractMessageStatus(message: string) {
+  const match = /(?:status|code)\D*(\d{3})/i.exec(message);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function classifyGeminiError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "unknown_error");
+  const status = extractErrorStatus(error) ?? extractMessageStatus(message);
+  const code = typeof (error as { code?: unknown })?.code === "string"
+    ? (error as { code?: string }).code
+    : null;
+  const isTimeout = Boolean(code && RETRYABLE_ERROR_CODES.has(code)) || /timed?\\s*out/i.test(message);
+  const retryable = isTimeout || status === 429 || (typeof status === "number" && status >= 500);
+  return { message, status, retryable };
 }
 
 async function fetchVideoForAnalysis(db: DbPool, videoId: string) {
@@ -133,7 +385,7 @@ async function fetchVideoForAnalysis(db: DbPool, videoId: string) {
 
 async function fetchAnalysisRecord(db: DbPool, videoId: string, promptHash: string) {
   const result = await db.query<AnalysisRecord>(
-    `select id, status
+    `select id, status, updated_at
      from video_analyses
      where video_id = $1
        and prompt_hash = $2
@@ -149,7 +401,7 @@ async function upsertVideoAnalysis(db: DbPool, params: {
   userId: string;
   prompt: string;
   promptHash: string;
-  status: string;
+  status: AnalysisStatus;
   model: string;
   analysisText: string;
   usage: Record<string, unknown> | null;
@@ -172,6 +424,9 @@ async function upsertVideoAnalysis(db: DbPool, params: {
      ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      on conflict (video_id, prompt_hash)
      do update set
+       playlist_id = excluded.playlist_id,
+       user_id = excluded.user_id,
+       prompt = excluded.prompt,
        analysis_text = excluded.analysis_text,
        model = excluded.model,
        usage = excluded.usage,
@@ -197,9 +452,72 @@ async function upsertVideoAnalysis(db: DbPool, params: {
   return result.rows[0]?.id ?? null;
 }
 
+async function upsertVideoAnalysisIfStatus(
+  db: DbPool,
+  params: {
+    videoId: string;
+    playlistId: string;
+    userId: string;
+    prompt: string;
+    promptHash: string;
+    status: AnalysisStatus;
+    model: string;
+    analysisText: string;
+    usage: Record<string, unknown> | null;
+    error: string | null;
+    skipReason: string | null;
+    allowedStatuses: AnalysisStatus[];
+  }
+) {
+  const result = await db.query<{ id: string; status: AnalysisStatus }>(
+    `insert into video_analyses (
+       video_id,
+       playlist_id,
+       user_id,
+       prompt,
+       prompt_hash,
+       analysis_text,
+       model,
+       usage,
+       status,
+       error,
+       skip_reason
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     on conflict (video_id, prompt_hash)
+     do update set
+       playlist_id = excluded.playlist_id,
+       user_id = excluded.user_id,
+       prompt = excluded.prompt,
+       analysis_text = excluded.analysis_text,
+       model = excluded.model,
+       usage = excluded.usage,
+       status = excluded.status,
+       error = excluded.error,
+       skip_reason = excluded.skip_reason
+     where video_analyses.status = any($12::text[])
+     returning id, status`,
+    [
+      params.videoId,
+      params.playlistId,
+      params.userId,
+      params.prompt,
+      params.promptHash,
+      params.analysisText,
+      params.model,
+      params.usage,
+      params.status,
+      params.error,
+      params.skipReason,
+      params.allowedStatuses
+    ]
+  );
+
+  return result.rows[0] ?? null;
+}
+
 async function updateVideoAnalysis(db: DbPool, params: {
   id: string;
-  status: string;
+  status: AnalysisStatus;
   model: string;
   analysisText: string;
   usage: Record<string, unknown> | null;
@@ -227,68 +545,41 @@ async function updateVideoAnalysis(db: DbPool, params: {
   );
 }
 
-type GeminiGenerateResponse = {
-  candidates?: Array<{
-    content?: { parts?: Array<{ text?: string }> };
-  }>;
-  usageMetadata?: Record<string, unknown>;
-};
-
 async function generateGeminiAnalysis(params: {
   apiKey: string;
-  model: string;
-  content: string;
+  model: GeminiModel;
+  videoUrl: string;
+  prompt: string;
 }) {
-  const url = new URL(`${GEMINI_API_BASE}/models/${params.model}:generateContent`);
-  url.searchParams.set("key", params.apiKey);
-
-  const response = await fetch(url.toString(), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: params.content }]
-        }
-      ],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 512
+  const adapter = createGeminiChat(params.model, params.apiKey);
+  const stream = chat({
+    adapter,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "video",
+            source: { type: "url", value: params.videoUrl }
+          },
+          {
+            type: "text",
+            content: buildAnalysisPrompt(params.prompt)
+          }
+        ]
       }
-    })
-  });
-
-  if (!response.ok) {
-    const raw = await response.text();
-    let message = response.statusText || "Gemini API error";
-    if (raw) {
-      try {
-        const payload = JSON.parse(raw) as { error?: { message?: string } };
-        message = payload?.error?.message ?? raw;
-      } catch {
-        message = raw;
+    ],
+    temperature: 0.2,
+    maxTokens: 768,
+    modelOptions: {
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseJsonSchema: ANALYSIS_OUTPUT_SCHEMA as unknown as any
       }
     }
-    throw new Error(`Gemini API error (${response.status}): ${message}`);
-  }
+  });
 
-  const payload = (await response.json()) as GeminiGenerateResponse;
-  const text = payload.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text ?? "")
-    .join("")
-    .trim();
-
-  if (!text) {
-    throw new Error("Gemini API returned empty content");
-  }
-
-  return {
-    text,
-    usage: payload.usageMetadata ?? null
-  };
+  return collectStream(stream);
 }
 
 async function upsertVideos(
@@ -779,7 +1070,7 @@ export async function registerWorkers(params: {
     const video = await fetchVideoForAnalysis(db, videoId);
     if (!video) {
       logger.warn({ videoId, playlistId, userId, jobId: job.id }, "Analyze video skipped; video missing");
-      return { status: "skipped", reason: "video_missing" };
+      return { status: ANALYSIS_STATUS.skipped, reason: "video_missing" };
     }
 
     if (video.playlist_id !== playlistId || video.user_id !== userId) {
@@ -793,91 +1084,110 @@ export async function registerWorkers(params: {
         },
         "Analyze video payload mismatch"
       );
-      return { status: "skipped", reason: "payload_mismatch" };
+      return { status: ANALYSIS_STATUS.skipped, reason: "payload_mismatch" };
     }
 
     const existing = await fetchAnalysisRecord(db, videoId, promptHash);
-    if (existing && (existing.status === "completed" || existing.status === "skipped")) {
+    if (existing && (existing.status === ANALYSIS_STATUS.completed || existing.status === ANALYSIS_STATUS.skipped)) {
       logger.info({ videoId, analysisId: existing.id, status: existing.status }, "Analyze video skipped; already done");
       return { status: existing.status, analysisId: existing.id, reason: "analysis_exists" };
     }
 
+    const processingStale = isProcessingStale(existing);
+    const reclaimableStatuses = processingStale
+      ? [...ANALYSIS_MUTABLE_STATUSES, ANALYSIS_STATUS.processing]
+      : ANALYSIS_MUTABLE_STATUSES;
+
+    if (existing?.status === ANALYSIS_STATUS.processing && !processingStale) {
+      logger.info({ videoId, analysisId: existing.id }, "Analyze video skipped; already processing");
+      return { status: ANALYSIS_STATUS.processing, analysisId: existing.id, reason: "analysis_in_progress" };
+    }
+    if (processingStale) {
+      logger.warn({ videoId, analysisId: existing?.id }, "Analyze video reclaiming stale processing");
+    }
+
     const durationSec = parseDurationToSeconds(video.duration);
-    if (durationSec > ANALYSIS_MAX_DURATION_SEC) {
-      const analysisId = await upsertVideoAnalysis(db, {
+    if (durationSec !== null && durationSec > ANALYSIS_MAX_DURATION_SEC) {
+      const skipped = await upsertVideoAnalysisIfStatus(db, {
         videoId,
         playlistId,
         userId,
         prompt,
         promptHash,
-        status: "skipped",
+        status: ANALYSIS_STATUS.skipped,
         model: config.geminiModel,
-        analysisText: "",
+        analysisText: "Skipped: duration_exceeded",
         usage: null,
         error: null,
-        skipReason: "duration_exceeded"
+        skipReason: "duration_exceeded",
+        allowedStatuses: reclaimableStatuses
       });
-      logger.info({ videoId, analysisId }, "Analyze video skipped; duration exceeded");
-      return { status: "skipped", reason: "duration_exceeded", analysisId };
+      if (!skipped) {
+        const current = await fetchAnalysisRecord(db, videoId, promptHash);
+        logger.info({ videoId, analysisId: current?.id }, "Analyze video skipped; already handled");
+        return { status: current?.status ?? ANALYSIS_STATUS.skipped, analysisId: current?.id, reason: "analysis_exists" };
+      }
+      logger.info({ videoId, analysisId: skipped.id }, "Analyze video skipped; duration exceeded");
+      return { status: ANALYSIS_STATUS.skipped, reason: "duration_exceeded", analysisId: skipped.id };
     }
 
     if (video.sync_status !== "synced") {
-      const analysisId = await upsertVideoAnalysis(db, {
+      const skipped = await upsertVideoAnalysisIfStatus(db, {
         videoId,
         playlistId,
         userId,
         prompt,
         promptHash,
-        status: "skipped",
+        status: ANALYSIS_STATUS.skipped,
         model: config.geminiModel,
-        analysisText: "",
+        analysisText: "Skipped: video_unavailable",
         usage: null,
         error: null,
-        skipReason: "video_unavailable"
+        skipReason: "video_unavailable",
+        allowedStatuses: reclaimableStatuses
       });
-      logger.info({ videoId, analysisId, syncStatus: video.sync_status }, "Analyze video skipped; unavailable");
-      return { status: "skipped", reason: "video_unavailable", analysisId };
+      if (!skipped) {
+        const current = await fetchAnalysisRecord(db, videoId, promptHash);
+        logger.info({ videoId, analysisId: current?.id }, "Analyze video skipped; already handled");
+        return { status: current?.status ?? ANALYSIS_STATUS.skipped, analysisId: current?.id, reason: "analysis_exists" };
+      }
+      logger.info({ videoId, analysisId: skipped.id, syncStatus: video.sync_status }, "Analyze video skipped; unavailable");
+      return { status: ANALYSIS_STATUS.skipped, reason: "video_unavailable", analysisId: skipped.id };
     }
 
     const model = config.geminiModel;
-    let analysisId = existing?.id ?? null;
+    const claimed = await upsertVideoAnalysisIfStatus(db, {
+      videoId,
+      playlistId,
+      userId,
+      prompt,
+      promptHash,
+      status: ANALYSIS_STATUS.processing,
+      model,
+      analysisText: "",
+      usage: null,
+      error: null,
+      skipReason: null,
+      allowedStatuses: reclaimableStatuses
+    });
 
-    if (analysisId) {
-      await updateVideoAnalysis(db, {
-        id: analysisId,
-        status: "processing",
-        model,
-        analysisText: "",
-        usage: null,
-        error: null,
-        skipReason: null
-      });
-    } else {
-      analysisId = await upsertVideoAnalysis(db, {
-        videoId,
-        playlistId,
-        userId,
-        prompt,
-        promptHash,
-        status: "processing",
-        model,
-        analysisText: "",
-        usage: null,
-        error: null,
-        skipReason: null
-      });
+    if (!claimed) {
+      const current = await fetchAnalysisRecord(db, videoId, promptHash);
+      if (current) {
+        logger.info({ videoId, analysisId: current.id, status: current.status }, "Analyze video skipped; already handled");
+        return { status: current.status, analysisId: current.id, reason: "analysis_exists" };
+      }
+      logger.warn({ videoId }, "Analyze video skipped; failed to claim analysis record");
+      return { status: ANALYSIS_STATUS.skipped, reason: "analysis_record_missing" };
     }
 
-    if (!analysisId) {
-      logger.warn({ videoId }, "Analyze video skipped; failed to create analysis record");
-      return { status: "skipped", reason: "analysis_record_missing" };
-    }
+    const analysisId = claimed.id;
 
     if (!config.geminiApiKey) {
       const errorMessage = "GEMINI_API_KEY is not configured";
       await updateVideoAnalysis(db, {
         id: analysisId,
-        status: "failed",
+        status: ANALYSIS_STATUS.failed,
         model,
         analysisText: errorMessage,
         usage: null,
@@ -885,44 +1195,74 @@ export async function registerWorkers(params: {
         skipReason: null
       });
       logger.error({ videoId, analysisId }, errorMessage);
-      return { status: "failed", analysisId, error: errorMessage };
+      return { status: ANALYSIS_STATUS.failed, analysisId, error: errorMessage };
     }
 
-    const content = buildAnalysisInput(video, prompt);
+    const videoUrl = buildYoutubeVideoUrl(video.youtube_video_id);
+
+    let responseText = "";
+    let usage: Record<string, unknown> | null = null;
 
     try {
       const result = await generateGeminiAnalysis({
         apiKey: config.geminiApiKey,
-        model,
-        content
+        model: model as GeminiModel,
+        videoUrl,
+        prompt
       });
-
+      responseText = result.content;
+      usage = result.usage ?? null;
+    } catch (error) {
+      const { message, status, retryable } = classifyGeminiError(error);
       await updateVideoAnalysis(db, {
         id: analysisId,
-        status: "completed",
+        status: ANALYSIS_STATUS.failed,
         model,
-        analysisText: result.text,
-        usage: result.usage,
-        error: null,
+        analysisText: message,
+        usage: null,
+        error: message,
         skipReason: null
       });
+      if (retryable) {
+        logger.warn({ videoId, analysisId, status }, "Analyze video retryable error");
+        throw error;
+      }
+      captureException(error);
+      logger.error({ videoId, analysisId, err: error }, "Analyze video failed");
+      return { status: ANALYSIS_STATUS.failed, analysisId, error: message };
+    }
 
-      logger.info({ videoId, analysisId, model }, "Analyze video completed");
-      return { status: "completed", analysisId };
+    let parsed: AnalysisOutput;
+    try {
+      parsed = parseAnalysisOutput(responseText);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "unknown_error";
+      const errorMessage = error instanceof Error ? error.message : "invalid_analysis_output";
       await updateVideoAnalysis(db, {
         id: analysisId,
-        status: "failed",
+        status: ANALYSIS_STATUS.failed,
         model,
-        analysisText: errorMessage,
-        usage: null,
+        analysisText: responseText || errorMessage,
+        usage,
         error: errorMessage,
         skipReason: null
       });
       captureException(error);
-      logger.error({ videoId, analysisId, err: error }, "Analyze video failed");
-      throw error;
+      logger.error({ videoId, analysisId, err: error }, "Analyze video response invalid");
+      return { status: ANALYSIS_STATUS.failed, analysisId, error: errorMessage };
     }
+
+    await updateVideoAnalysis(db, {
+      id: analysisId,
+      status: ANALYSIS_STATUS.completed,
+      model,
+      analysisText: JSON.stringify(parsed),
+      usage,
+      error: null,
+      skipReason: null
+    });
+
+    logger.info({ videoId, analysisId, model }, "Analyze video completed");
+    return { status: ANALYSIS_STATUS.completed, analysisId };
   });
 }
+
