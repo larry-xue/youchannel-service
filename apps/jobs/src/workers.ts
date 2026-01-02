@@ -295,6 +295,7 @@ export async function registerWorkers(params: {
   // Ensure queues exist before registering workers
   await boss.createQueue("kickoff");
   await boss.createQueue("sync.playlist");
+  await boss.createQueue("analyze.video");
 
   await boss.work("kickoff", async (job: any) => {
     const kickoffSource = (job.data as { source?: string } | null)?.source ?? "schedule";
