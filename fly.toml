@@ -6,7 +6,9 @@
 app = 'youchannel-service'
 primary_region = 'iad'
 
-[build]
+[env]
+  PORT = "4000"
+  NODE_ENV = "production"
 
 [http_service]
   internal_port = 4000
