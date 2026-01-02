@@ -12,6 +12,8 @@ const envSchema = z.object({
   YOUTUBE_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
   GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
+  GEMINI_API_KEY: z.string().min(1).optional(),
+  GEMINI_MODEL: z.string().min(1).optional(),
   KICKOFF_CRON: z.string().optional(),
   KICKOFF_BATCH_LIMIT: z.coerce.number().int().positive().default(50),
   SYNC_INTERVAL_SEC: z.coerce.number().int().positive().default(3600),
@@ -30,6 +32,8 @@ export type Config = {
   openapiSharedKey: string;
   youtubeOAuthClientId?: string;
   youtubeOAuthClientSecret?: string;
+  geminiApiKey?: string;
+  geminiModel: string;
   kickoffCron?: string;
   kickoffBatchLimit: number;
   syncIntervalSec: number;
@@ -60,6 +64,8 @@ export function loadConfig(): Config {
     openapiSharedKey: parsed.data.OPENAPI_SHARED_KEY,
     youtubeOAuthClientId,
     youtubeOAuthClientSecret,
+    geminiApiKey: parsed.data.GEMINI_API_KEY,
+    geminiModel: parsed.data.GEMINI_MODEL ?? "gemini-1.5-flash",
     kickoffCron: parsed.data.KICKOFF_CRON,
     kickoffBatchLimit: parsed.data.KICKOFF_BATCH_LIMIT,
     syncIntervalSec: parsed.data.SYNC_INTERVAL_SEC,

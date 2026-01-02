@@ -1,4 +1,5 @@
 ﻿import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { fetchJobRuns, fetchSyncRuns, retryJobRun } from "../lib/jobsApi";
 import { useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
@@ -98,7 +99,17 @@ type Tab = "dashboard" | "system-users" | "admin-users" | "videos";
 export function Dashboard() {
   const { session } = useAuth();
   const token = session?.access_token;
-  const [activeTab, setActiveTab] = useState<Tab>("dashboard");
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const activeTab: Tab =
+    pathname === "/"
+      ? "dashboard"
+      : pathname.startsWith("/users")
+        ? "system-users"
+        : pathname.startsWith("/admins")
+          ? "admin-users"
+          : pathname.startsWith("/videos")
+            ? "videos"
+            : "dashboard";
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runsPage, setRunsPage] = useState(1);
   const tabCopy: Record<Tab, { eyebrow: string; title: string; description: string }> = {
@@ -276,40 +287,48 @@ export function Dashboard() {
           </div>
           <nav className="mt-6 space-y-1">
             <Button
+              asChild
               variant={activeTab === "dashboard" ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => setActiveTab("dashboard")}
               className="w-full justify-start"
             >
-              <Activity className="h-4 w-4" />
-              Dashboard
+              <Link to="/">
+                <Activity className="h-4 w-4" />
+                Dashboard
+              </Link>
             </Button>
             <Button
+              asChild
               variant={activeTab === "system-users" ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => setActiveTab("system-users")}
               className="w-full justify-start"
             >
-              <Users className="h-4 w-4" />
-              Users
+              <Link to="/users">
+                <Users className="h-4 w-4" />
+                Users
+              </Link>
             </Button>
             <Button
+              asChild
               variant={activeTab === "admin-users" ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => setActiveTab("admin-users")}
               className="w-full justify-start"
             >
-              <Shield className="h-4 w-4" />
-              Admin Users
+              <Link to="/admins">
+                <Shield className="h-4 w-4" />
+                Admin Users
+              </Link>
             </Button>
             <Button
+              asChild
               variant={activeTab === "videos" ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => setActiveTab("videos")}
               className="w-full justify-start"
             >
-              <Film className="h-4 w-4" />
-              Videos
+              <Link to="/videos">
+                <Film className="h-4 w-4" />
+                Videos
+              </Link>
             </Button>
           </nav>
         </div>

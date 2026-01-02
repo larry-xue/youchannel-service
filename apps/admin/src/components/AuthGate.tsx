@@ -2,7 +2,7 @@ import { LoginForm } from "./LoginForm";
 import { useAdminAccess } from "../lib/admin";
 import { useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
-import { Dashboard } from "./Dashboard";
+import { Outlet } from "@tanstack/react-router";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -97,5 +97,5 @@ export function AuthGate() {
     );
   }
 
-  return <Dashboard />;
+  return <Outlet />;
 }

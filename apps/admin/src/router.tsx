@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
 import { AuthGate } from "./components/AuthGate";
+import { Dashboard } from "./components/Dashboard";
 
 function RootLayout() {
   return (
@@ -19,13 +20,39 @@ const rootRoute = createRootRoute({
   component: RootLayout
 });
 
-const indexRoute = createRoute({
+const authRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/",
+  id: "auth",
   component: AuthGate
 });
 
-const routeTree = rootRoute.addChildren([indexRoute]);
+const dashboardRoute = createRoute({
+  getParentRoute: () => authRoute,
+  path: "/",
+  component: Dashboard
+});
+
+const systemUsersRoute = createRoute({
+  getParentRoute: () => authRoute,
+  path: "users",
+  component: Dashboard
+});
+
+const adminUsersRoute = createRoute({
+  getParentRoute: () => authRoute,
+  path: "admins",
+  component: Dashboard
+});
+
+const videosRoute = createRoute({
+  getParentRoute: () => authRoute,
+  path: "videos",
+  component: Dashboard
+});
+
+const routeTree = rootRoute.addChildren([
+  authRoute.addChildren([dashboardRoute, systemUsersRoute, adminUsersRoute, videosRoute])
+]);
 
 export const router = createRouter({
   routeTree
