@@ -131,7 +131,7 @@ export async function buildServer(params: {
   });
 
   await app.register(cors, {
-    origin: config.adminOrigin,
+    origin: "*",
     credentials: true
   });
 
