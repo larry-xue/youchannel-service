@@ -52,15 +52,16 @@ export async function reservePlaylistsForSync(
       [params.limit]
     );
 
-    const now = new Date();
     for (const row of result.rows) {
       const intervalSec = row.sync_interval_sec ?? params.defaultIntervalSec;
       const jitterWindow = Math.min(Math.floor(intervalSec * jitterRatio), jitterMaxSec);
       const jitterSec = jitterWindow > 0 ? Math.floor(Math.random() * jitterWindow) : 0;
-      const nextSyncAt = new Date(now.getTime() + (intervalSec + jitterSec) * 1000);
+      const totalSec = intervalSec + jitterSec;
       await client.query(
-        `update playlists set next_sync_at = $1 where id = $2`,
-        [nextSyncAt, row.id]
+        `update playlists
+         set next_sync_at = timezone('utc'::text, now()) + ($1::int * interval '1 second')
+         where id = $2`,
+        [totalSec, row.id]
       );
     }
 
