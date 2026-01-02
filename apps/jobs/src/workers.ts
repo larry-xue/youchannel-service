@@ -185,9 +185,7 @@ function parseDurationToSeconds(value?: string | null) {
 }
 
 function buildAnalysisPrompt(prompt: string) {
-  const trimmed = prompt.trim();
-  if (!trimmed) return ANALYSIS_PROMPT_BASE;
-  return `${ANALYSIS_PROMPT_BASE}\n\nAdditional focus:\n${trimmed}`;
+  return ANALYSIS_PROMPT_BASE;
 }
 
 function buildYoutubeVideoUrl(videoId: string) {
@@ -570,7 +568,7 @@ async function generateGeminiAnalysis(params: {
       }
     ],
     temperature: 0.2,
-    maxTokens: 768,
+    maxTokens: 65536,
     modelOptions: {
       generationConfig: {
         responseMimeType: "application/json",
@@ -791,6 +789,7 @@ export async function registerWorkers(params: {
       const jobRunId = payload?.jobRunId;
 
       if (!syncRunId || !playlistId || !jobRunId) {
+        logger.error({ jobId: job.id }, "sync.playlist missing required payload");
         throw new Error("sync.playlist missing required payload");
       }
 
@@ -1055,7 +1054,7 @@ export async function registerWorkers(params: {
     }
   });
 
-  await boss.work("analyze.video", async (job: any) => {
+  const handleAnalyzeVideoJob = async (job: any) => {
     const payload = job.data as AnalyzeVideoPayload | null;
     const videoId = payload?.videoId;
     const playlistId = payload?.playlistId;
@@ -1064,8 +1063,11 @@ export async function registerWorkers(params: {
     const promptHash = payload?.promptHash;
 
     if (!videoId || !playlistId || !userId || !prompt || !promptHash) {
+      logger.error({ jobId: job.id }, "analyze.video missing required payload");
       throw new Error("analyze.video missing required payload");
     }
+
+    logger.info({ jobId: job.id, videoId, playlistId, userId }, "Analyze video started");
 
     const video = await fetchVideoForAnalysis(db, videoId);
     if (!video) {
@@ -1263,6 +1265,20 @@ export async function registerWorkers(params: {
 
     logger.info({ videoId, analysisId, model }, "Analyze video completed");
     return { status: ANALYSIS_STATUS.completed, analysisId };
+  };
+
+  await boss.work("analyze.video", async (jobs: any) => {
+    const jobList = normalizeJobList(jobs ?? []);
+    if (jobList.length === 0) {
+      logger.error("Analyze video worker received empty job batch");
+      return { status: ANALYSIS_STATUS.failed, reason: "job_missing" };
+    }
+
+    const results = [];
+    for (const job of jobList) {
+      results.push(await handleAnalyzeVideoJob(job));
+    }
+
+    return results.length === 1 ? results[0] : results;
   });
 }
-
