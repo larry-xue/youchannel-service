@@ -7,6 +7,7 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   ADMIN_ORIGIN: z.string().min(1).default("http://localhost:5173"),
+  OPENAPI_SHARED_KEY: z.string().min(1),
   KICKOFF_CRON: z.string().optional(),
   KICKOFF_BATCH_LIMIT: z.coerce.number().int().positive().default(50),
   SYNC_INTERVAL_SEC: z.coerce.number().int().positive().default(3600),
@@ -22,6 +23,7 @@ export type Config = {
   supabaseUrl: string;
   supabaseServiceRoleKey: string;
   adminOrigin: string;
+  openapiSharedKey: string;
   kickoffCron?: string;
   kickoffBatchLimit: number;
   syncIntervalSec: number;
@@ -44,6 +46,7 @@ export function loadConfig(): Config {
     supabaseUrl: parsed.data.SUPABASE_URL,
     supabaseServiceRoleKey: parsed.data.SUPABASE_SERVICE_ROLE_KEY,
     adminOrigin: parsed.data.ADMIN_ORIGIN,
+    openapiSharedKey: parsed.data.OPENAPI_SHARED_KEY,
     kickoffCron: parsed.data.KICKOFF_CRON,
     kickoffBatchLimit: parsed.data.KICKOFF_BATCH_LIMIT,
     syncIntervalSec: parsed.data.SYNC_INTERVAL_SEC,

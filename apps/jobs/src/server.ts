@@ -7,8 +7,9 @@ import fastifyStatic from "@fastify/static";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import type { Config } from "./config.js";
+import { enqueueAnalyses, fetchAnalysisCandidates } from "./analysis.js";
 import { createAdminGuard } from "./admin-auth.js";
-import { getJobRunById, listJobRuns, listSyncRuns, updateJobRunById, type DbPool } from "./db.js";
+import { getJobRunById, getPlaylistForAnalysis, listJobRuns, listSyncRuns, updateJobRunById, type DbPool } from "./db.js";
 import { buildSyncPlaylistJobOptions } from "./queue.js";
 
 type YoutubeAccountRow = {
@@ -48,6 +49,52 @@ function parseTimestamp(value: string | null | undefined) {
   if (!value) return 0;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function readHeaderValue(value: string | string[] | undefined) {
+  if (!value) return undefined;
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function extractServiceKey(headers: Record<string, string | string[] | undefined>) {
+  const direct =
+    readHeaderValue(headers["x-openapi-key"]) ??
+    readHeaderValue(headers["x-api-key"]) ??
+    readHeaderValue(headers["x-service-key"]);
+  if (direct) return direct;
+
+  const auth = readHeaderValue(headers.authorization);
+  if (auth && auth.toLowerCase().startsWith("bearer ")) {
+    return auth.slice(7).trim();
+  }
+
+  return undefined;
+}
+
+function parseRequiredString(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseStringArray(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return null;
+  const items = value.map((item) => (typeof item === "string" ? item.trim() : ""));
+  if (items.some((item) => item.length === 0)) return null;
+  return items;
+}
+
+function normalizeUnique(values?: string[] | null) {
+  if (!values) return values;
+  return Array.from(new Set(values));
+}
+
+function parseLimit(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  const limit = Number(value);
+  if (!Number.isFinite(limit) || limit <= 0) return null;
+  return Math.trunc(limit);
 }
 
 function buildAccountSummary(row: YoutubeAccountRow): YoutubeAccountSummary {
@@ -146,6 +193,18 @@ export async function buildServer(params: {
   });
 
   const requireAdmin = createAdminGuard(supabase);
+  const requireServiceKey = async (request: any, reply: any) => {
+    if (!config.openapiSharedKey) {
+      reply.code(503).send({ error: "service_unavailable" });
+      return;
+    }
+
+    const key = extractServiceKey(request.headers as Record<string, string | string[] | undefined>);
+    if (!key || key !== config.openapiSharedKey) {
+      reply.code(401).send({ error: "unauthorized" });
+      return;
+    }
+  };
 
   // Add custom content type parser to handle empty JSON body
   app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => {
@@ -162,6 +221,69 @@ export async function buildServer(params: {
   });
 
   app.get("/health", async () => ({ ok: true }));
+
+  app.post("/openapi/analysis", { preHandler: requireServiceKey }, async (request, reply) => {
+    const body = request.body as Record<string, unknown> | null;
+    const playlistId = parseRequiredString(body?.playlistId);
+    const userId = parseRequiredString(body?.userId);
+    const videoIds = normalizeUnique(parseStringArray(body?.videoIds));
+    const limit = parseLimit(body?.limit);
+
+    if (!playlistId || !userId) {
+      reply.code(400);
+      return { error: "missing_playlist_or_user" };
+    }
+
+    if (videoIds === null) {
+      reply.code(400);
+      return { error: "invalid_video_ids" };
+    }
+
+    if (limit === null) {
+      reply.code(400);
+      return { error: "invalid_limit" };
+    }
+
+    const playlist = await getPlaylistForAnalysis(db, playlistId);
+    if (!playlist) {
+      reply.code(404);
+      return { error: "playlist_not_found" };
+    }
+
+    if (playlist.user_id !== userId) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+
+    const candidates = await fetchAnalysisCandidates(db, {
+      playlistId,
+      videoIds,
+      limit
+    });
+
+    if (videoIds && candidates.length !== videoIds.length) {
+      reply.code(403);
+      return { error: "video_forbidden" };
+    }
+
+    const result = await enqueueAnalyses({
+      boss,
+      db,
+      userId,
+      playlistId,
+      prompt: playlist.analysis_prompt,
+      candidates
+    });
+
+    return {
+      playlistId,
+      userId,
+      candidateCount: candidates.length,
+      enqueued: result.enqueued,
+      skipped: result.skipped,
+      skipReasons: result.skipReasons
+    };
+  });
 
   app.get("/admin/sync-runs", { preHandler: requireAdmin }, async (request) => {
     const limit = Number((request.query as { limit?: string }).limit ?? 50);
@@ -219,6 +341,70 @@ export async function buildServer(params: {
     });
 
     return { bossJobId };
+  });
+
+  app.post("/admin/analysis", { preHandler: requireAdmin }, async (request, reply) => {
+    const body = request.body as Record<string, unknown> | null;
+    const playlistId = parseRequiredString(body?.playlistId);
+    const userId = parseRequiredString(body?.userId);
+    const videoIds = normalizeUnique(parseStringArray(body?.videoIds));
+    const limit = parseLimit(body?.limit);
+
+    if (!playlistId) {
+      reply.code(400);
+      return { error: "missing_playlist" };
+    }
+
+    if (videoIds === null) {
+      reply.code(400);
+      return { error: "invalid_video_ids" };
+    }
+
+    if (limit === null) {
+      reply.code(400);
+      return { error: "invalid_limit" };
+    }
+
+    const playlist = await getPlaylistForAnalysis(db, playlistId);
+    if (!playlist) {
+      reply.code(404);
+      return { error: "playlist_not_found" };
+    }
+
+    if (userId && playlist.user_id !== userId) {
+      reply.code(400);
+      return { error: "user_mismatch" };
+    }
+
+    const actingUserId = userId ?? playlist.user_id;
+    const candidates = await fetchAnalysisCandidates(db, {
+      playlistId,
+      videoIds,
+      limit
+    });
+
+    if (videoIds && candidates.length !== videoIds.length) {
+      reply.code(400);
+      return { error: "video_mismatch" };
+    }
+
+    const result = await enqueueAnalyses({
+      boss,
+      db,
+      userId: actingUserId,
+      playlistId,
+      prompt: playlist.analysis_prompt,
+      candidates
+    });
+
+    return {
+      playlistId,
+      userId: actingUserId,
+      candidateCount: candidates.length,
+      enqueued: result.enqueued,
+      skipped: result.skipped,
+      skipReasons: result.skipReasons
+    };
   });
 
   // Admin users management
@@ -354,7 +540,7 @@ export async function buildServer(params: {
   // SPA 回退路由：所有非 API 路由都返回 index.html
   app.setNotFoundHandler(async (request, reply) => {
     // 如果是 API 路由（以 /admin/ 或 /health 开头），返回 404
-    if (request.url.startsWith("/admin/") || request.url.startsWith("/health")) {
+    if (request.url.startsWith("/admin/") || request.url.startsWith("/openapi/") || request.url.startsWith("/health")) {
       reply.code(404);
       return { error: "not_found" };
     }

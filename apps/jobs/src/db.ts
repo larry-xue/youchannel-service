@@ -21,6 +21,13 @@ export type PlaylistWithAccount = {
   access_token: string | null;
 };
 
+export type PlaylistAnalysisTarget = {
+  id: string;
+  user_id: string;
+  entry_status: string;
+  analysis_prompt: string;
+};
+
 export function createDbPool(databaseUrl: string) {
   return new Pool({ connectionString: databaseUrl });
 }
@@ -87,6 +94,17 @@ export async function getPlaylistWithAccount(pool: DbPool, playlistId: string) {
      from playlists p
      left join youtube_accounts ya on ya.id = p.youtube_account_id
      where p.id = $1`,
+    [playlistId]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function getPlaylistForAnalysis(pool: DbPool, playlistId: string) {
+  const result = await pool.query<PlaylistAnalysisTarget>(
+    `select id, user_id, entry_status, analysis_prompt
+     from playlists
+     where id = $1`,
     [playlistId]
   );
 

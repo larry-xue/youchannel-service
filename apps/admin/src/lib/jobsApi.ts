@@ -63,6 +63,23 @@ export function retryJobRun(token: string, jobRunId: string) {
   );
 }
 
+export function enqueueAnalysis(
+  token: string,
+  payload: { playlistId: string; userId?: string; videoIds?: string[]; limit?: number }
+) {
+  return request<{
+    playlistId: string;
+    userId: string;
+    candidateCount: number;
+    enqueued: number;
+    skipped: number;
+    skipReasons: Record<string, number>;
+  }>("/admin/analysis", token, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export function fetchAdminUsers(token: string) {
   return request<{ rows: Array<{ user_id: string; email?: string; created_at: string; user_created_at?: string }> }>(
     "/admin/users",
