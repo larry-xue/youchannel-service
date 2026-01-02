@@ -21,6 +21,12 @@ COPY apps/jobs ./apps/jobs
 COPY apps/admin ./apps/admin
 COPY tsconfig.base.json ./
 
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+
 # Build workspace (frontend + backend)
 RUN pnpm build
 

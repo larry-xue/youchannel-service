@@ -200,7 +200,7 @@ export async function buildServer(params: {
   });
 
   await app.register(cors, {
-    origin: "*",
+    origin: process.env.NODE_ENV === "production" ? false : "*",
     credentials: true
   });
 
