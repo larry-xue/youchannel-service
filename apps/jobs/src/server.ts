@@ -9,7 +9,15 @@ import { readFileSync } from "node:fs";
 import type { Config } from "./config.js";
 import { enqueueAnalyses, fetchAnalysisCandidates } from "./analysis.js";
 import { createAdminGuard } from "./admin-auth.js";
-import { getJobRunById, getPlaylistForAnalysis, listJobRuns, listSyncRuns, updateJobRunById, type DbPool } from "./db.js";
+import {
+  getJobRunById,
+  getPlaylistForAnalysis,
+  listAdminVideos,
+  listJobRuns,
+  listSyncRuns,
+  updateJobRunById,
+  type DbPool
+} from "./db.js";
 import { buildSyncPlaylistJobOptions } from "./queue.js";
 
 type YoutubeAccountRow = {
@@ -77,6 +85,13 @@ function parseRequiredString(value: unknown) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function parseOptionalQueryString(value: string | string[] | undefined) {
+  if (value === undefined) return undefined;
+  const raw = Array.isArray(value) ? value[0] : value;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function parseStringArray(value: unknown) {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) return null;
@@ -95,6 +110,13 @@ function parseLimit(value: unknown) {
   const limit = Number(value);
   if (!Number.isFinite(limit) || limit <= 0) return null;
   return Math.trunc(limit);
+}
+
+function parseOffset(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  const offset = Number(value);
+  if (!Number.isFinite(offset) || offset < 0) return null;
+  return Math.trunc(offset);
 }
 
 function buildAccountSummary(row: YoutubeAccountRow): YoutubeAccountSummary {
@@ -288,6 +310,39 @@ export async function buildServer(params: {
   app.get("/admin/sync-runs", { preHandler: requireAdmin }, async (request) => {
     const limit = Number((request.query as { limit?: string }).limit ?? 50);
     const rows = await listSyncRuns(db, Number.isFinite(limit) ? limit : 50);
+    return { rows };
+  });
+
+  app.get("/admin/videos", { preHandler: requireAdmin }, async (request, reply) => {
+    const query = request.query as Record<string, string | string[] | undefined>;
+    const userId = parseOptionalQueryString(query.userId);
+    const syncStatus = parseOptionalQueryString(query.syncStatus);
+    const limit = parseLimit(query.limit);
+    const offset = parseOffset(query.offset);
+
+    if (limit === null) {
+      reply.code(400);
+      return { error: "invalid_limit" };
+    }
+
+    if (offset === null) {
+      reply.code(400);
+      return { error: "invalid_offset" };
+    }
+
+    const allowedStatuses = new Set(["synced", "removed", "unavailable"]);
+    if (syncStatus && !allowedStatuses.has(syncStatus)) {
+      reply.code(400);
+      return { error: "invalid_sync_status" };
+    }
+
+    const rows = await listAdminVideos(db, {
+      userId,
+      syncStatus,
+      limit: limit ?? 50,
+      offset: offset ?? 0
+    });
+
     return { rows };
   });
 

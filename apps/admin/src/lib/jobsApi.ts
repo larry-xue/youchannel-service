@@ -39,6 +39,30 @@ export type SystemUserRow = {
   youtube_accounts: YoutubeAccountSummary[];
 };
 
+export type AdminVideoRow = {
+  id: string;
+  playlist_id: string;
+  playlist_user_id: string;
+  playlist_youtube_id: string;
+  youtube_video_id: string;
+  title: string | null;
+  duration: string | null;
+  sync_status: string;
+  last_seen_at: string | null;
+  removed_at: string | null;
+  created_at: string;
+  analysis_count: number;
+  analysis_id: string | null;
+  analysis_status: string | null;
+  analysis_model: string | null;
+  analysis_prompt: string | null;
+  analysis_prompt_hash: string | null;
+  analysis_text: string | null;
+  analysis_error: string | null;
+  analysis_created_at: string | null;
+  analysis_updated_at: string | null;
+};
+
 export function fetchSyncRuns(token: string, limit = 50) {
   return request<{ rows: Array<Record<string, unknown>> }>(`/admin/sync-runs?limit=${limit}`, token);
 }
@@ -61,6 +85,20 @@ export function retryJobRun(token: string, jobRunId: string) {
     token,
     { method: "POST" }
   );
+}
+
+export function fetchAdminVideos(
+  token: string,
+  params?: { userId?: string; syncStatus?: string; limit?: number; offset?: number }
+) {
+  const searchParams = new URLSearchParams();
+  if (params?.userId) searchParams.set("userId", params.userId);
+  if (params?.syncStatus) searchParams.set("syncStatus", params.syncStatus);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  const suffix = searchParams.toString();
+  const path = suffix ? `/admin/videos?${suffix}` : "/admin/videos";
+  return request<{ rows: AdminVideoRow[] }>(path, token);
 }
 
 export function enqueueAnalysis(

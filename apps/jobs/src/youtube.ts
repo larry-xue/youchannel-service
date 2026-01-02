@@ -43,6 +43,22 @@ export class YouTubeApiError extends Error {
   }
 }
 
+export class OAuthTokenError extends Error {
+  status?: number;
+  error?: string;
+  errorDescription?: string;
+
+  constructor(
+    message: string,
+    params: { status?: number; error?: string; errorDescription?: string } = {}
+  ) {
+    super(message);
+    this.status = params.status;
+    this.error = params.error;
+    this.errorDescription = params.errorDescription;
+  }
+}
+
 async function requestJson<T>(url: string, accessToken: string): Promise<T> {
   const response = await fetch(url, {
     headers: {
@@ -69,12 +85,74 @@ async function requestJson<T>(url: string, accessToken: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+type OAuthRefreshResponse = {
+  access_token: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+  token_type?: string;
+};
+
 function chunk<T>(items: T[], size: number) {
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
     chunks.push(items.slice(i, i + size));
   }
   return chunks;
+}
+
+export async function refreshAccessToken(params: {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}) {
+  const body = new URLSearchParams({
+    client_id: params.clientId,
+    client_secret: params.clientSecret,
+    refresh_token: params.refreshToken,
+    grant_type: "refresh_token"
+  });
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: body.toString()
+  });
+
+  if (!response.ok) {
+    let errorCode: string | undefined;
+    let errorDescription: string | undefined;
+    let message = response.statusText || "OAuth refresh failed";
+
+    try {
+      const payload = (await response.json()) as {
+        error?: string;
+        error_description?: string;
+      };
+      errorCode = payload.error;
+      errorDescription = payload.error_description;
+      if (errorDescription || errorCode) {
+        message = errorDescription ?? errorCode ?? message;
+      }
+    } catch {
+      // ignore JSON parse errors
+    }
+
+    throw new OAuthTokenError(message, {
+      status: response.status,
+      error: errorCode,
+      errorDescription
+    });
+  }
+
+  const data = (await response.json()) as OAuthRefreshResponse;
+  if (!data?.access_token) {
+    throw new OAuthTokenError("OAuth refresh response missing access_token");
+  }
+
+  return data;
 }
 
 export async function fetchPlaylistItems(accessToken: string, playlistId: string) {

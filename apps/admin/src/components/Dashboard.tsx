@@ -8,10 +8,11 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Badge } from "./ui/badge";
 import { Skeleton } from "./ui/skeleton";
-import { Activity, AlertTriangle, CheckCircle2, Clock, LogOut, Play, RefreshCw, Shield, Users } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Clock, Film, LogOut, Play, RefreshCw, Shield, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AdminUsers } from "./AdminUsers";
 import { SystemUsers } from "./SystemUsers";
+import { Videos } from "./Videos";
 
 function formatTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -92,7 +93,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-type Tab = "dashboard" | "system-users" | "admin-users";
+type Tab = "dashboard" | "system-users" | "admin-users" | "videos";
 
 export function Dashboard() {
   const { session } = useAuth();
@@ -115,6 +116,11 @@ export function Dashboard() {
       eyebrow: "Administration",
       title: "Admin Access",
       description: "Manage admin accounts, add operators, and secure access."
+    },
+    videos: {
+      eyebrow: "Library",
+      title: "Video Management",
+      description: "Filter synced videos and trigger Gemini analysis on demand."
     }
   };
   const activeCopy = tabCopy[activeTab];
@@ -253,8 +259,9 @@ export function Dashboard() {
   ];
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-      <aside className="space-y-6">
+    <div className="mx-auto w-full max-w-6xl">
+      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+        <aside className="space-y-6">
         <div className="rounded-2xl border border-border/70 bg-card/80 p-5 shadow-sm backdrop-blur">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -295,6 +302,15 @@ export function Dashboard() {
               <Shield className="h-4 w-4" />
               Admin Users
             </Button>
+            <Button
+              variant={activeTab === "videos" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setActiveTab("videos")}
+              className="w-full justify-start"
+            >
+              <Film className="h-4 w-4" />
+              Videos
+            </Button>
           </nav>
         </div>
 
@@ -316,9 +332,9 @@ export function Dashboard() {
             </Button>
           </CardContent>
         </Card>
-      </aside>
+        </aside>
 
-      <section className="space-y-6">
+        <section className="space-y-6">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
@@ -348,6 +364,8 @@ export function Dashboard() {
 
         {activeTab === "admin-users" ? (
           <AdminUsers />
+        ) : activeTab === "videos" ? (
+          <Videos />
         ) : activeTab === "system-users" ? (
           <SystemUsers />
         ) : (
@@ -737,7 +755,8 @@ export function Dashboard() {
             </div>
           </>
         )}
-      </section>
+        </section>
+      </div>
     </div>
   );
 }

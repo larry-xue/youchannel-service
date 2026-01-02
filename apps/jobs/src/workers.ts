@@ -11,12 +11,21 @@ import {
   updatePlaylistEntryStatus,
   updatePlaylistLastSyncedAt,
   updateSyncRun,
+  updateYoutubeAccountTokens,
   type DbPool
 } from "./db.js";
 import { buildSyncPlaylistJobOptions } from "./queue.js";
-import { fetchPlaylistItems, fetchVideoDetails, type PlaylistItem, YouTubeApiError } from "./youtube.js";
+import {
+  fetchPlaylistItems,
+  fetchVideoDetails,
+  refreshAccessToken,
+  type PlaylistItem,
+  OAuthTokenError,
+  YouTubeApiError
+} from "./youtube.js";
 
 const VIDEO_UPSERT_CHUNK_SIZE = 100;
+const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
 
 type SyncPlaylistPayload = {
   syncRunId: string;
@@ -47,6 +56,14 @@ function pickThumbnailUrl(thumbnails?: Record<string, { url?: string }>) {
 
 function normalizeJobList<T>(jobs: JobWithMetadata<T>[] | JobWithMetadata<T>) {
   return Array.isArray(jobs) ? jobs : [jobs];
+}
+
+function shouldRefreshAccessToken(accessToken: string | null, expiresAt: string | Date | null) {
+  if (!accessToken) return true;
+  if (!expiresAt) return false;
+  const expiresMs = expiresAt instanceof Date ? expiresAt.getTime() : Date.parse(expiresAt);
+  if (Number.isNaN(expiresMs)) return false;
+  return expiresMs <= Date.now() + ACCESS_TOKEN_REFRESH_SKEW_MS;
 }
 
 async function upsertVideos(
@@ -291,20 +308,118 @@ export async function registerWorkers(params: {
         continue;
       }
 
-      if (!playlist.access_token) {
-        await updatePlaylistEntryStatus(db, playlist.id, "auth_invalid");
+      let accessToken = playlist.access_token;
+      const needsRefresh = shouldRefreshAccessToken(accessToken, playlist.expires_at);
+
+      if (needsRefresh && playlist.refresh_token) {
+        const clientId = config.youtubeOAuthClientId;
+        const clientSecret = config.youtubeOAuthClientSecret;
+
+        if (!clientId || !clientSecret) {
+          await updateJobRunById(db, jobRunId, {
+            status: "failed",
+            finishedAt: new Date(),
+            error: "oauth_config_missing",
+            result: { reason: "oauth_config_missing" }
+          });
+          logger.error({ syncRunId, jobRunId, playlistId }, "Missing OAuth client config for refresh");
+          continue;
+        }
+
+        try {
+          const refreshed = await refreshAccessToken({
+            clientId,
+            clientSecret,
+            refreshToken: playlist.refresh_token
+          });
+
+          const tokenUpdates: {
+            accessToken: string;
+            refreshToken?: string | null;
+            expiresAt?: Date | null;
+            scope?: string | null;
+            tokenType?: string | null;
+          } = { accessToken: refreshed.access_token };
+
+          const expiresIn = typeof refreshed.expires_in === "number" ? refreshed.expires_in : Number.NaN;
+          if (Number.isFinite(expiresIn)) {
+            tokenUpdates.expiresAt = new Date(Date.now() + expiresIn * 1000);
+          }
+
+          if (refreshed.refresh_token) {
+            tokenUpdates.refreshToken = refreshed.refresh_token;
+          }
+          if (refreshed.scope !== undefined) {
+            tokenUpdates.scope = refreshed.scope ?? null;
+          }
+          if (refreshed.token_type !== undefined) {
+            tokenUpdates.tokenType = refreshed.token_type ?? null;
+          }
+
+          if (playlist.youtube_account_id) {
+            await updateYoutubeAccountTokens(db, playlist.youtube_account_id, tokenUpdates);
+          }
+
+          accessToken = refreshed.access_token;
+          logger.info(
+            { syncRunId, jobRunId, playlistId, youtubeAccountId: playlist.youtube_account_id },
+            "YouTube access token refreshed"
+          );
+        } catch (error) {
+          const finishedAt = new Date();
+          if (error instanceof OAuthTokenError) {
+            await updateJobRunById(db, jobRunId, {
+              status: "failed",
+              finishedAt,
+              error: "oauth_refresh_failed",
+              result: {
+                httpStatus: error.status,
+                reason: error.error ?? error.message,
+                description: error.errorDescription
+              }
+            });
+
+            if (error.status === 429 || (typeof error.status === "number" && error.status >= 500)) {
+              captureException(error);
+              logger.error(
+                { syncRunId, jobRunId, playlistId, err: error },
+                "OAuth refresh retryable error"
+              );
+              throw error;
+            }
+
+            logger.warn(
+              { syncRunId, jobRunId, playlistId, err: error },
+              "OAuth refresh failed"
+            );
+            continue;
+          }
+
+          await updateJobRunById(db, jobRunId, {
+            status: "failed",
+            finishedAt,
+            error: "oauth_refresh_failed",
+            result: { reason: error instanceof Error ? error.message : "unknown_error" }
+          });
+          captureException(error);
+          logger.error({ syncRunId, jobRunId, playlistId, err: error }, "OAuth refresh failed");
+          throw error;
+        }
+      }
+
+      if (!accessToken) {
         await updateJobRunById(db, jobRunId, {
           status: "skipped",
           finishedAt: new Date(),
-          error: "auth_invalid",
-          result: { reason: "auth_invalid" }
+          error: "auth_missing",
+          result: { reason: "auth_missing" }
         });
         continue;
       }
 
       const startedAt = Date.now();
       try {
-        const { items } = await fetchPlaylistItems(playlist.access_token, playlist.playlist_id);
+        const { items } = await fetchPlaylistItems(accessToken, playlist.playlist_id);
         const idMap = new Map<string, PlaylistItem>();
         const videoIds: string[] = [];
 
@@ -315,7 +430,7 @@ export async function registerWorkers(params: {
           videoIds.push(videoId);
         }
 
-        const videoDetails = await fetchVideoDetails(playlist.access_token, videoIds);
+        const videoDetails = await fetchVideoDetails(accessToken, videoIds);
         const seenAt = new Date();
 
         const existingStatuses = await fetchExistingVideoStatuses(db, playlist.id, videoIds);
