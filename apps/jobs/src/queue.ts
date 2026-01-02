@@ -1,6 +1,6 @@
 import type { PgBoss, SendOptions } from "pg-boss";
 import type { Logger } from "pino";
-import type { Config } from "./config";
+import type { Config } from "./config.js";
 
 const SYNC_RETRY_LIMIT = 5;
 const SYNC_RETRY_DELAY_SEC = 60;

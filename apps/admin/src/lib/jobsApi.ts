@@ -39,10 +39,6 @@ export type SystemUserRow = {
   youtube_accounts: YoutubeAccountSummary[];
 };
 
-export function kickoff(token: string) {
-  return request<{ bossJobId: string | null }>("/admin/kickoff-sync", token, { method: "POST" });
-}
-
 export function fetchSyncRuns(token: string, limit = 50) {
   return request<{ rows: Array<Record<string, unknown>> }>(`/admin/sync-runs?limit=${limit}`, token);
 }

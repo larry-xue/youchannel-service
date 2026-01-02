@@ -6,10 +6,10 @@ import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
-import type { Config } from "./config";
-import { createAdminGuard } from "./admin-auth";
-import { getJobRunById, listJobRuns, listSyncRuns, updateJobRunById, type DbPool } from "./db";
-import { buildSyncPlaylistJobOptions } from "./queue";
+import type { Config } from "./config.js";
+import { createAdminGuard } from "./admin-auth.js";
+import { getJobRunById, listJobRuns, listSyncRuns, updateJobRunById, type DbPool } from "./db.js";
+import { buildSyncPlaylistJobOptions } from "./queue.js";
 
 type YoutubeAccountRow = {
   id: string;
@@ -162,21 +162,6 @@ export async function buildServer(params: {
   });
 
   app.get("/health", async () => ({ ok: true }));
-
-  app.post(
-    "/admin/kickoff-sync",
-    {
-      preHandler: requireAdmin
-    },
-    async (request) => {
-      const bossJobId = await boss.send("kickoff", {
-        source: "admin-manual",
-        requestedBy: request.adminUser?.id
-      });
-
-      return { bossJobId };
-    }
-  );
 
   app.get("/admin/sync-runs", { preHandler: requireAdmin }, async (request) => {
     const limit = Number((request.query as { limit?: string }).limit ?? 50);

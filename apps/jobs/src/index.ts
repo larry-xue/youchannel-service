@@ -14,15 +14,15 @@ if (result.error && !result.parsed) {
 
 import { PgBoss } from "pg-boss";
 import type { Logger } from "pino";
-import type { Config } from "./config";
-import { loadConfig } from "./config";
-import { buildLogger } from "./logger";
-import { initSentry } from "./sentry";
-import { buildSupabaseClient } from "./supabase";
-import { buildServer } from "./server";
-import { createDbPool } from "./db";
-import { registerWorkers } from "./workers";
-import { scheduleKickoff } from "./queue";
+import type { Config } from "./config.js";
+import { loadConfig } from "./config.js";
+import { buildLogger } from "./logger.js";
+import { initSentry } from "./sentry.js";
+import { buildSupabaseClient } from "./supabase.js";
+import { buildServer } from "./server.js";
+import { createDbPool } from "./db.js";
+import { registerWorkers } from "./workers.js";
+import { scheduleKickoff } from "./queue.js";
 
 function isValidDatabaseUrl(databaseUrl: string) {
   try {
@@ -128,7 +128,7 @@ async function start() {
   await scheduleKickoff(boss, configObj, logger);
 
   const app = await buildServer({ config: configObj, logger, boss, db, supabase });
-  await app.listen({ port: configObj.port });
+  await app.listen({ port: configObj.port, host: "0.0.0.0" });
 
   logger.info({ port: configObj.port }, "Jobs service running");
 

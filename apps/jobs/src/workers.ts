@@ -1,8 +1,8 @@
 import { createHash } from "crypto";
 import type { JobWithMetadata, PgBoss } from "pg-boss";
 import type { Logger } from "pino";
-import { captureException } from "./sentry";
-import type { Config } from "./config";
+import { captureException } from "./sentry.js";
+import type { Config } from "./config.js";
 import {
   getPlaylistWithAccount,
   insertJobRun,
@@ -13,9 +13,9 @@ import {
   updatePlaylistLastSyncedAt,
   updateSyncRun,
   type DbPool
-} from "./db";
-import { buildSyncPlaylistJobOptions } from "./queue";
-import { fetchPlaylistItems, fetchVideoDetails, type PlaylistItem, YouTubeApiError } from "./youtube";
+} from "./db.js";
+import { buildSyncPlaylistJobOptions } from "./queue.js";
+import { fetchPlaylistItems, fetchVideoDetails, type PlaylistItem, YouTubeApiError } from "./youtube.js";
 
 const ANALYSIS_MAX_DURATION_SEC = 3600;
 const VIDEO_UPSERT_CHUNK_SIZE = 100;

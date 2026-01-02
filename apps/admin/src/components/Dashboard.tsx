@@ -1,5 +1,5 @@
 ﻿import { useMutation, useQuery } from "@tanstack/react-query";
-import { fetchJobRuns, fetchSyncRuns, kickoff, retryJobRun } from "../lib/jobsApi";
+import { fetchJobRuns, fetchSyncRuns, retryJobRun } from "../lib/jobsApi";
 import { useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { Button } from "./ui/button";
@@ -104,7 +104,7 @@ export function Dashboard() {
     dashboard: {
       eyebrow: "Operations",
       title: "YouChannel Control Center",
-      description: "Queue sync runs, review history, and keep the pipeline healthy."
+      description: "Monitor scheduled sync runs, review history, and keep the pipeline healthy."
     },
     "system-users": {
       eyebrow: "Users",
@@ -123,11 +123,6 @@ export function Dashboard() {
     queryKey: ["sync-runs"],
     enabled: Boolean(token) && activeTab === "dashboard",
     queryFn: () => fetchSyncRuns(token ?? "")
-  });
-
-  const kickoffMutation = useMutation({
-    mutationFn: () => kickoff(token ?? ""),
-    onSuccess: () => syncRunsQuery.refetch()
   });
 
   const retryMutation = useMutation({
@@ -339,14 +334,6 @@ export function Dashboard() {
           {activeTab === "dashboard" && (
             <div className="flex flex-wrap items-center gap-3">
               <Button
-                onClick={() => kickoffMutation.mutate()}
-                disabled={kickoffMutation.isPending}
-                size="lg"
-              >
-                <Play className="h-4 w-4" />
-                {kickoffMutation.isPending ? "Enqueuing..." : "Kickoff Sync"}
-              </Button>
-              <Button
                 variant="outline"
                 onClick={() => syncRunsQuery.refetch()}
                 disabled={syncRunsQuery.isFetching}
@@ -365,14 +352,6 @@ export function Dashboard() {
           <SystemUsers />
         ) : (
           <>
-            {kickoffMutation.error && (
-              <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
-                <AlertDescription>
-                  Kickoff failed: {String(kickoffMutation.error)}
-                </AlertDescription>
-              </Alert>
-            )}
-
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {summaryCards.map((card, index) => (
                 <Card
@@ -494,7 +473,7 @@ export function Dashboard() {
                           ) : (
                             <TableRow>
                               <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                                No sync runs yet. Kick one off to begin.
+                                No sync runs yet. Scheduled runs will appear here.
                               </TableCell>
                             </TableRow>
                           )}
@@ -706,7 +685,7 @@ export function Dashboard() {
                       </>
                     ) : (
                       <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
-                        No sync runs yet. Start the first run to populate live metrics.
+                        No sync runs yet. Waiting for the scheduler to run.
                       </div>
                     )}
                   </CardContent>
@@ -750,7 +729,7 @@ export function Dashboard() {
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Use the control panel to queue new sync runs.
+                      Scheduled runs will appear automatically. Refresh to update.
                     </p>
                   </CardContent>
                 </Card>
