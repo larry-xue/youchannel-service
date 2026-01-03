@@ -117,8 +117,10 @@ try {
 }
 
 async function start() {
+  logger.info("Starting pg-boss...");
   try {
     await boss.start();
+    logger.info("pg-boss started successfully");
   } catch (error) {
     logger.error({ err: error }, "Failed to start pg-boss");
     throw error;
