@@ -86,6 +86,7 @@ const ANALYSIS_PROMPT_BASE = [
 ].join("\n");
 
 const ANALYSIS_STATUS = {
+  queued: "queued",
   pending: "pending",
   processing: "processing",
   completed: "completed",
@@ -96,6 +97,7 @@ const ANALYSIS_STATUS = {
 type AnalysisStatus = (typeof ANALYSIS_STATUS)[keyof typeof ANALYSIS_STATUS];
 
 const ANALYSIS_MUTABLE_STATUSES: AnalysisStatus[] = [
+  ANALYSIS_STATUS.queued,
   ANALYSIS_STATUS.pending,
   ANALYSIS_STATUS.failed
 ];
@@ -521,7 +523,15 @@ async function updateVideoAnalysis(db: DbPool, params: {
   usage: Record<string, unknown> | null;
   error: string | null;
   skipReason: string | null;
+  failedCountUpdate?: "increment" | "reset";
 }) {
+  const failedCountExpression =
+    params.failedCountUpdate === "increment"
+      ? "failed_count + 1"
+      : params.failedCountUpdate === "reset"
+        ? "0"
+        : "failed_count";
+
   await db.query(
     `update video_analyses
      set analysis_text = $1,
@@ -529,7 +539,8 @@ async function updateVideoAnalysis(db: DbPool, params: {
          usage = $3,
          status = $4,
          error = $5,
-         skip_reason = $6
+         skip_reason = $6,
+         failed_count = ${failedCountExpression}
      where id = $7`,
     [
       params.analysisText,
@@ -540,6 +551,15 @@ async function updateVideoAnalysis(db: DbPool, params: {
       params.skipReason,
       params.id
     ]
+  );
+}
+
+async function refundAnalysisQuota(db: DbPool, userId: string) {
+  await db.query(
+    `update user_quotas
+     set analysis_count = greatest(analysis_count - 1, 0)
+     where user_id = $1`,
+    [userId]
   );
 }
 
@@ -1090,11 +1110,6 @@ export async function registerWorkers(params: {
     }
 
     const existing = await fetchAnalysisRecord(db, videoId, promptHash);
-    if (existing && (existing.status === ANALYSIS_STATUS.completed || existing.status === ANALYSIS_STATUS.skipped)) {
-      logger.info({ videoId, analysisId: existing.id, status: existing.status }, "Analyze video skipped; already done");
-      return { status: existing.status, analysisId: existing.id, reason: "analysis_exists" };
-    }
-
     const processingStale = isProcessingStale(existing);
     const reclaimableStatuses = processingStale
       ? [...ANALYSIS_MUTABLE_STATUSES, ANALYSIS_STATUS.processing]
@@ -1194,8 +1209,10 @@ export async function registerWorkers(params: {
         analysisText: errorMessage,
         usage: null,
         error: errorMessage,
-        skipReason: null
+        skipReason: null,
+        failedCountUpdate: "increment"
       });
+      await refundAnalysisQuota(db, userId);
       logger.error({ videoId, analysisId }, errorMessage);
       return { status: ANALYSIS_STATUS.failed, analysisId, error: errorMessage };
     }
@@ -1223,14 +1240,16 @@ export async function registerWorkers(params: {
         analysisText: message,
         usage: null,
         error: message,
-        skipReason: null
+        skipReason: null,
+        failedCountUpdate: "increment"
       });
+      await refundAnalysisQuota(db, userId);
       if (retryable) {
-        logger.warn({ videoId, analysisId, status }, "Analyze video retryable error");
+        logger.warn({ videoId, analysisId, status, errorMessage: message }, "Analyze video retryable error");
         throw error;
       }
       captureException(error);
-      logger.error({ videoId, analysisId, err: error }, "Analyze video failed");
+      logger.error({ videoId, analysisId, err: error, errorMessage: message }, "Analyze video failed");
       return { status: ANALYSIS_STATUS.failed, analysisId, error: message };
     }
 
@@ -1246,10 +1265,15 @@ export async function registerWorkers(params: {
         analysisText: responseText || errorMessage,
         usage,
         error: errorMessage,
-        skipReason: null
+        skipReason: null,
+        failedCountUpdate: "increment"
       });
+      await refundAnalysisQuota(db, userId);
       captureException(error);
-      logger.error({ videoId, analysisId, err: error }, "Analyze video response invalid");
+      logger.error(
+        { videoId, analysisId, err: error, errorMessage },
+        "Analyze video response invalid"
+      );
       return { status: ANALYSIS_STATUS.failed, analysisId, error: errorMessage };
     }
 
@@ -1260,7 +1284,8 @@ export async function registerWorkers(params: {
       analysisText: JSON.stringify(parsed),
       usage,
       error: null,
-      skipReason: null
+      skipReason: null,
+      failedCountUpdate: "reset"
     });
 
     logger.info({ videoId, analysisId, model }, "Analyze video completed");

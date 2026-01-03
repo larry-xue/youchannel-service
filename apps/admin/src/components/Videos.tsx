@@ -207,7 +207,9 @@ export function Videos() {
               <TableBody>
                 {rows.length ? (
                   rows.map((row) => {
-                    const canAnalyze = row.sync_status === "synced";
+                    const analysisStatus = row.analysis_status ?? "";
+                    const isLocked = analysisStatus === "queued" || analysisStatus === "processing";
+                    const canAnalyze = row.sync_status === "synced" && !isLocked;
                     const isPending = analyzeMutation.isPending && analyzeMutation.variables?.id === row.id;
                     const analysisPreview = row.analysis_text ?? row.analysis_error ?? "";
                     return (
@@ -262,7 +264,13 @@ export function Videos() {
                             size="sm"
                             onClick={() => analyzeMutation.mutate(row)}
                             disabled={!canAnalyze || isPending}
-                            title={canAnalyze ? "Queue analysis" : "Only synced videos can be analyzed"}
+                            title={
+                              canAnalyze
+                                ? "Queue analysis"
+                                : isLocked
+                                  ? "Analysis is already queued or processing"
+                                  : "Only synced videos can be analyzed"
+                            }
                           >
                             {isPending ? (
                               <>

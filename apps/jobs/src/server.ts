@@ -294,6 +294,7 @@ export async function buildServer(params: {
       userId,
       playlistId,
       prompt: playlist.analysis_prompt,
+      model: config.geminiModel,
       candidates
     });
 
@@ -449,6 +450,7 @@ export async function buildServer(params: {
       userId: actingUserId,
       playlistId,
       prompt: playlist.analysis_prompt,
+      model: config.geminiModel,
       candidates
     });
 

@@ -22,6 +22,11 @@ type VideoCandidateRow = {
   duration: string | null;
 };
 
+type AnalysisStatusRow = {
+  video_id: string;
+  status: string;
+};
+
 function parseDurationToSeconds(value?: string | null) {
   if (!value) return null;
   const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(value);
@@ -79,11 +84,13 @@ export async function enqueueAnalyses(params: {
   userId: string;
   playlistId: string;
   prompt: string;
+  model: string;
   candidates: AnalysisCandidate[];
 }): Promise<AnalysisResult> {
   const skipReasons: Record<string, number> = {
     duration_exceeded: 0,
-    analysis_exists: 0,
+    already_queued: 0,
+    analysis_in_progress: 0,
     quota_exceeded: 0
   };
 
@@ -105,18 +112,28 @@ export async function enqueueAnalyses(params: {
 
   const promptHash = createHash("sha256").update(params.prompt).digest("hex");
   const candidateIds = withinDuration.map((candidate) => candidate.videoId);
-  const existing = await params.db.query(
-    `select video_id
-     from video_analyses
-     where video_id = any($1::uuid[])
-       and prompt_hash = $2`,
-    [candidateIds, promptHash]
-  );
-  const existingSet = new Set(existing.rows.map((row: { video_id: string }) => row.video_id));
+  const existingStatuses = new Map<string, string>();
+  if (candidateIds.length > 0) {
+    const existing = await params.db.query<AnalysisStatusRow>(
+      `select video_id, status
+       from video_analyses
+       where video_id = any($1::uuid[])
+         and prompt_hash = $2`,
+      [candidateIds, promptHash]
+    );
+    for (const row of existing.rows) {
+      existingStatuses.set(row.video_id, row.status);
+    }
+  }
 
   const filtered = withinDuration.filter((candidate) => {
-    if (existingSet.has(candidate.videoId)) {
-      skipReasons.analysis_exists += 1;
+    const status = existingStatuses.get(candidate.videoId);
+    if (status === "queued") {
+      skipReasons.already_queued += 1;
+      return false;
+    }
+    if (status === "processing") {
+      skipReasons.analysis_in_progress += 1;
       return false;
     }
     return true;
@@ -153,6 +170,56 @@ export async function enqueueAnalyses(params: {
 
   let enqueued = 0;
   for (const candidate of toQueue) {
+    const queued = await params.db.query<{ id: string }>(
+      `insert into video_analyses (
+         video_id,
+         playlist_id,
+         user_id,
+         prompt,
+         prompt_hash,
+         analysis_text,
+         model,
+         usage,
+         status,
+         error,
+         skip_reason
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       on conflict (video_id, prompt_hash)
+       do update set
+         playlist_id = excluded.playlist_id,
+         user_id = excluded.user_id,
+         prompt = excluded.prompt,
+         status = excluded.status,
+         error = null,
+         skip_reason = null
+       where video_analyses.status <> 'queued'
+         and video_analyses.status <> 'processing'
+       returning id`,
+      [
+        candidate.videoId,
+        params.playlistId,
+        params.userId,
+        params.prompt,
+        promptHash,
+        "",
+        params.model,
+        null,
+        "queued",
+        null,
+        null
+      ]
+    );
+
+    if (!queued.rows[0]?.id) {
+      const status = existingStatuses.get(candidate.videoId);
+      if (status === "processing") {
+        skipReasons.analysis_in_progress += 1;
+      } else {
+        skipReasons.already_queued += 1;
+      }
+      continue;
+    }
+
     const bossJobId = await params.boss.send(
       "analyze.video",
       {
@@ -168,7 +235,7 @@ export async function enqueueAnalyses(params: {
     if (bossJobId) {
       enqueued += 1;
     } else {
-      skipReasons.analysis_exists += 1;
+      skipReasons.already_queued += 1;
     }
   }
 
