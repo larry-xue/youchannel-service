@@ -270,10 +270,10 @@ export function Dashboard() {
   ];
 
   return (
-    <div className="mx-auto w-full max-w-6xl">
-      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+    <div className="w-full max-w-full">
+      <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="space-y-6">
-        <div className="rounded-2xl border border-border/70 bg-card/80 p-5 shadow-sm backdrop-blur">
+          <div className="rounded-2xl border border-border/70 bg-card/80 p-5 shadow-sm backdrop-blur">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <span className="text-sm font-semibold">YC</span>
@@ -354,14 +354,14 @@ export function Dashboard() {
         </aside>
 
         <section className="space-y-6">
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              {activeCopy.eyebrow}
-            </p>
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-              {activeCopy.title}
-            </h1>
+          <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                {activeCopy.eyebrow}
+              </p>
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                {activeCopy.title}
+              </h1>
             <p className="mt-2 text-sm text-muted-foreground">
               {activeCopy.description}
             </p>
@@ -381,7 +381,7 @@ export function Dashboard() {
           )}
         </header>
 
-        {activeTab === "admin-users" ? (
+          {activeTab === "admin-users" ? (
           <AdminUsers />
         ) : activeTab === "videos" ? (
           <Videos />
@@ -389,7 +389,7 @@ export function Dashboard() {
           <SystemUsers />
         ) : (
           <>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {summaryCards.map((card, index) => (
                 <Card
                   key={card.label}
@@ -419,7 +419,7 @@ export function Dashboard() {
               ))}
             </div>
 
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)]">
               <div className="space-y-6">
                 <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
                   <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

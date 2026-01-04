@@ -800,6 +800,7 @@ export async function registerWorkers(params: {
   });
 
   await boss.work("sync.playlist", { includeMetadata: true }, async (jobs) => {
+    logger.info({ jobsCount: jobs.length }, "sync.playlist jobs received");
     const jobList = normalizeJobList(jobs);
 
     for (const job of jobList) {
