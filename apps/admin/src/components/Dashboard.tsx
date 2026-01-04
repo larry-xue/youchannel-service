@@ -1,4 +1,4 @@
-﻿import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { fetchJobRuns, fetchSyncRuns, retryJobRun } from "../lib/jobsApi";
 import { useAuth } from "../lib/auth";
@@ -9,6 +9,13 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Badge } from "./ui/badge";
 import { Skeleton } from "./ui/skeleton";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "./ui/pagination";
 import { Activity, AlertTriangle, CheckCircle2, Clock, Film, LogOut, Play, RefreshCw, Shield, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AdminUsers } from "./AdminUsers";
@@ -522,27 +529,27 @@ export function Dashboard() {
                         <span>
                           Showing {runPageStart + 1}-{Math.min(runPageEnd, totalRuns)} of {totalRuns}
                         </span>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setRunsPage((prev) => Math.max(1, prev - 1))}
-                            disabled={runsPage === 1}
-                          >
-                            Previous
-                          </Button>
-                          <span>
-                            Page {runsPage} of {totalRunPages}
-                          </span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setRunsPage((prev) => Math.min(totalRunPages, prev + 1))}
-                            disabled={runsPage === totalRunPages}
-                          >
-                            Next
-                          </Button>
-                        </div>
+                        <Pagination>
+                          <PaginationContent>
+                            <PaginationItem>
+                              <PaginationPrevious
+                                onClick={() => setRunsPage((prev) => Math.max(1, prev - 1))}
+                                className={runsPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                              />
+                            </PaginationItem>
+                            <PaginationItem>
+                              <span className="flex h-9 items-center px-3 text-sm">
+                                Page {runsPage} of {totalRunPages}
+                              </span>
+                            </PaginationItem>
+                            <PaginationItem>
+                              <PaginationNext
+                                onClick={() => setRunsPage((prev) => Math.min(totalRunPages, prev + 1))}
+                                className={runsPage === totalRunPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                              />
+                            </PaginationItem>
+                          </PaginationContent>
+                        </Pagination>
                       </div>
                     )}
                   </CardContent>

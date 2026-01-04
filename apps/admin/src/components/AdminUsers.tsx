@@ -9,6 +9,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Alert, AlertDescription } from "./ui/alert";
 import { Skeleton } from "./ui/skeleton";
 import { Badge } from "./ui/badge";
+import { Switch } from "./ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { useState } from "react";
 import { Plus, Trash2, Loader2 } from "lucide-react";
 
@@ -27,6 +37,8 @@ export function AdminUsers() {
   const [password, setPassword] = useState("");
   const [createNew, setCreateNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<string | null>(null);
 
   const adminUsersQuery = useQuery({
     queryKey: ["admin-users"],
@@ -90,8 +102,15 @@ export function AdminUsers() {
   };
 
   const handleRemove = (userId: string) => {
-    if (confirm("Are you sure you want to remove this admin user?")) {
-      removeMutation.mutate(userId);
+    setUserToDelete(userId);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmRemove = () => {
+    if (userToDelete) {
+      removeMutation.mutate(userToDelete);
+      setDeleteDialogOpen(false);
+      setUserToDelete(null);
     }
   };
 
@@ -120,18 +139,16 @@ export function AdminUsers() {
             </div>
             <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 p-3">
               <div className="flex items-start gap-3">
-                <input
-                  type="checkbox"
+                <Switch
                   id="createNew"
                   checked={createNew}
-                  onChange={(e) => {
-                    setCreateNew(e.target.checked);
-                    if (!e.target.checked) {
+                  onCheckedChange={(checked) => {
+                    setCreateNew(checked);
+                    if (!checked) {
                       setPassword("");
                     }
                   }}
                   disabled={addMutation.isPending}
-                  className="mt-1 h-4 w-4 rounded border-input text-primary focus-visible:ring-2 focus-visible:ring-ring/40"
                 />
                 <div>
                   <Label htmlFor="createNew" className="text-sm font-medium">
@@ -251,19 +268,25 @@ export function AdminUsers() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRemove(row.user_id)}
-                            disabled={removeMutation.isPending || isCurrentUser}
-                            aria-label={
-                              isCurrentUser
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span tabIndex={isCurrentUser ? 0 : undefined}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleRemove(row.user_id)}
+                                  disabled={removeMutation.isPending || isCurrentUser}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {isCurrentUser
                                 ? "Cannot remove your own access"
-                                : "Remove admin user"
-                            }
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                                : "Remove admin user"}
+                            </TooltipContent>
+                          </Tooltip>
                         </TableCell>
                       </TableRow>
                     );
@@ -280,6 +303,32 @@ export function AdminUsers() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Admin User</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove this admin user? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmRemove} disabled={removeMutation.isPending}>
+              {removeMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Removing...
+                </>
+              ) : (
+                "Remove"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

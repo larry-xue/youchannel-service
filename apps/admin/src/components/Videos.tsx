@@ -10,6 +10,21 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Skeleton } from "./ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "./ui/pagination";
 import { Loader2, RefreshCw, Sparkles } from "lucide-react";
 
 const STATUS_OPTIONS = [
@@ -139,18 +154,18 @@ export function Videos() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="filter-status">Sync status</Label>
-            <select
-              id="filter-status"
-              value={formStatus}
-              onChange={(event) => setFormStatus(event.target.value)}
-              className="h-10 w-full rounded-lg border border-input/80 bg-background/80 px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-            >
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            <Select value={formStatus} onValueChange={setFormStatus}>
+              <SelectTrigger id="filter-status" className="h-10 w-full">
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex items-end">
             <Button type="submit" className="w-full">
@@ -260,30 +275,36 @@ export function Videos() {
                           )}
                         </TableCell>
                         <TableCell className="align-top">
-                          <Button
-                            size="sm"
-                            onClick={() => analyzeMutation.mutate(row)}
-                            disabled={!canAnalyze || isPending}
-                            title={
-                              canAnalyze
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span tabIndex={!canAnalyze ? 0 : undefined}>
+                                <Button
+                                  size="sm"
+                                  onClick={() => analyzeMutation.mutate(row)}
+                                  disabled={!canAnalyze || isPending}
+                                >
+                                  {isPending ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                      Queuing...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Sparkles className="h-4 w-4" />
+                                      {row.analysis_status ? "Re-run" : "Analyze"}
+                                    </>
+                                  )}
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {canAnalyze
                                 ? "Queue analysis"
                                 : isLocked
                                   ? "Analysis is already queued or processing"
-                                  : "Only synced videos can be analyzed"
-                            }
-                          >
-                            {isPending ? (
-                              <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Queuing...
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="h-4 w-4" />
-                                {row.analysis_status ? "Re-run" : "Analyze"}
-                              </>
-                            )}
-                          </Button>
+                                  : "Only synced videos can be analyzed"}
+                            </TooltipContent>
+                          </Tooltip>
                         </TableCell>
                       </TableRow>
                     );
@@ -303,24 +324,22 @@ export function Videos() {
                 <span>
                   Page {page} · Showing {rows.length} videos
                 </span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                    disabled={page === 1}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setPage((prev) => prev + 1)}
-                    disabled={!hasNextPage}
-                  >
-                    Next
-                  </Button>
-                </div>
+                <Pagination>
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                        className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                      />
+                    </PaginationItem>
+                    <PaginationItem>
+                      <PaginationNext
+                        onClick={() => setPage((prev) => prev + 1)}
+                        className={!hasNextPage ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
               </div>
             )}
           </>
