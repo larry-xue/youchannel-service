@@ -45,12 +45,27 @@ type YoutubeAccountSummary = {
   has_refresh_token: boolean;
 };
 
+type UserQuotaInfo = {
+  analysis_count: number;
+  max_analyses: number;
+} | null;
+
 type SystemUserRow = {
   id: string;
   email: string | null;
+  phone: string | null;
   created_at: string;
+  confirmed_at: string | null;
+  email_confirmed_at: string | null;
+  phone_confirmed_at: string | null;
   last_sign_in_at: string | null;
+  role: string | null;
+  aud: string | null;
+  app_metadata: Record<string, unknown> | null;
+  user_metadata: Record<string, unknown> | null;
+  is_anonymous: boolean;
   youtube_accounts: YoutubeAccountSummary[];
+  quota: UserQuotaInfo;
 };
 
 function parseTimestamp(value: string | null | undefined) {
@@ -466,7 +481,6 @@ export async function buildServer(params: {
 
   // Admin users management
   app.get("/admin/users", { preHandler: requireAdmin }, async () => {
-    // Use service role to query admin_users and join with auth.users
     const { data, error } = await supabase
       .from("admin_users")
       .select(`
@@ -479,16 +493,45 @@ export async function buildServer(params: {
       throw error;
     }
 
-    // Get user emails from auth.users using admin API
-    const { data: allUsers } = await supabase.auth.admin.listUsers();
-    const userMap = new Map(allUsers.users.map((u) => [u.id, u.email]));
+    const { data: userList, error: userError } = await supabase.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000
+    });
+
+    if (userError) {
+      throw userError;
+    }
+
+    const userMap = new Map(userList.users.map((user) => [user.id, user]));
 
     return {
-      rows: data.map((row: any) => ({
-        user_id: row.user_id,
-        created_at: row.created_at,
-        email: userMap.get(row.user_id) || null
-      }))
+      rows: data.map((row: any) => {
+        const user = userMap.get(row.user_id);
+        const identities =
+          user?.identities?.map((identity: any) => ({
+            id: identity.id,
+            provider: identity.provider,
+            identity_data: identity.identity_data ?? null,
+            user_id: identity.user_id
+          })) ?? [];
+
+        return {
+          user_id: row.user_id,
+          created_at: row.created_at,
+          email: user?.email ?? null,
+          user_created_at: user?.created_at ?? null,
+          last_sign_in_at: user?.last_sign_in_at ?? null,
+          confirmed_at: user?.confirmed_at ?? null,
+          email_confirmed_at: user?.email_confirmed_at ?? null,
+          phone: user?.phone ?? null,
+          phone_confirmed_at: user?.phone_confirmed_at ?? null,
+          role: user?.role ?? null,
+          aud: user?.aud ?? null,
+          app_metadata: user?.app_metadata ?? null,
+          user_metadata: user?.user_metadata ?? null,
+          identities
+        };
+      })
     };
   });
 
@@ -564,11 +607,31 @@ export async function buildServer(params: {
     return { success: true };
   });
 
-  app.get("/admin/system-users", { preHandler: requireAdmin }, async () => {
-    const [users, youtubeAccounts] = await Promise.all([
+  app.get("/admin/system-users", { preHandler: requireAdmin }, async (request, reply) => {
+    const query = request.query as Record<string, string | string[] | undefined>;
+    const email = parseOptionalQueryString(query.email);
+    const limit = parseLimit(query.limit);
+    const offset = parseOffset(query.offset);
+
+    if (limit === null) {
+      reply.code(400);
+      return { error: "invalid_limit" };
+    }
+
+    if (offset === null) {
+      reply.code(400);
+      return { error: "invalid_offset" };
+    }
+
+    const [users, youtubeAccounts, quotasResult] = await Promise.all([
       listAllAuthUsers(supabase),
-      listAllYoutubeAccounts(supabase)
+      listAllYoutubeAccounts(supabase),
+      supabase.from("user_quotas").select("user_id, analysis_count, max_analyses")
     ]);
+
+    if (quotasResult.error) {
+      throw quotasResult.error;
+    }
 
     const accountsByUser = new Map<string, YoutubeAccountSummary[]>();
     for (const account of youtubeAccounts) {
@@ -581,17 +644,53 @@ export async function buildServer(params: {
       }
     }
 
-    const rows: SystemUserRow[] = users.map((user) => ({
+    const quotasByUser = new Map<string, UserQuotaInfo>();
+    for (const quota of quotasResult.data ?? []) {
+      quotasByUser.set(quota.user_id, {
+        analysis_count: quota.analysis_count,
+        max_analyses: quota.max_analyses
+      });
+    }
+
+    let filteredUsers = users;
+
+    // Filter by email (case-insensitive contains)
+    if (email) {
+      const lowerEmail = email.toLowerCase();
+      filteredUsers = filteredUsers.filter(
+        (user) => user.email?.toLowerCase().includes(lowerEmail)
+      );
+    }
+
+    // Sort by created_at descending
+    filteredUsers.sort((a, b) => parseTimestamp(b.created_at) - parseTimestamp(a.created_at));
+
+    const total = filteredUsers.length;
+    const effectiveLimit = limit ?? 20;
+    const effectiveOffset = offset ?? 0;
+
+    // Paginate
+    const paginatedUsers = filteredUsers.slice(effectiveOffset, effectiveOffset + effectiveLimit);
+
+    const rows: SystemUserRow[] = paginatedUsers.map((user) => ({
       id: user.id,
       email: user.email ?? null,
+      phone: user.phone ?? null,
       created_at: user.created_at,
+      confirmed_at: user.confirmed_at ?? null,
+      email_confirmed_at: user.email_confirmed_at ?? null,
+      phone_confirmed_at: user.phone_confirmed_at ?? null,
       last_sign_in_at: user.last_sign_in_at ?? null,
-      youtube_accounts: accountsByUser.get(user.id) ?? []
+      role: user.role ?? null,
+      aud: user.aud ?? null,
+      app_metadata: user.app_metadata ?? null,
+      user_metadata: user.user_metadata ?? null,
+      is_anonymous: user.is_anonymous ?? false,
+      youtube_accounts: accountsByUser.get(user.id) ?? [],
+      quota: quotasByUser.get(user.id) ?? null
     }));
 
-    rows.sort((a, b) => parseTimestamp(b.created_at) - parseTimestamp(a.created_at));
-
-    return { rows };
+    return { rows, total };
   });
 
   // SPA 回退路由：所有非 API 路由都返回 index.html

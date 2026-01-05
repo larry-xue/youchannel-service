@@ -31,12 +31,57 @@ export type YoutubeAccountSummary = {
   has_refresh_token: boolean;
 };
 
+export type UserQuotaInfo = {
+  analysis_count: number;
+  max_analyses: number;
+} | null;
+
 export type SystemUserRow = {
   id: string;
   email: string | null;
+  phone: string | null;
   created_at: string;
+  confirmed_at: string | null;
+  email_confirmed_at: string | null;
+  phone_confirmed_at: string | null;
   last_sign_in_at: string | null;
+  role: string | null;
+  aud: string | null;
+  app_metadata: Record<string, unknown> | null;
+  user_metadata: Record<string, unknown> | null;
+  is_anonymous: boolean;
   youtube_accounts: YoutubeAccountSummary[];
+  quota: UserQuotaInfo;
+};
+
+export type SystemUsersParams = {
+  email?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type AdminUserIdentity = {
+  id: number;
+  provider: string | null;
+  identity_data: Record<string, unknown> | null;
+  user_id: string;
+};
+
+export type AdminUserRow = {
+  user_id: string;
+  created_at: string;
+  user_created_at: string | null;
+  email: string | null;
+  last_sign_in_at: string | null;
+  confirmed_at: string | null;
+  email_confirmed_at: string | null;
+  phone: string | null;
+  phone_confirmed_at: string | null;
+  role: string | null;
+  aud: string | null;
+  app_metadata: Record<string, unknown> | null;
+  user_metadata: Record<string, unknown> | null;
+  identities: AdminUserIdentity[];
 };
 
 export type AdminVideoRow = {
@@ -119,10 +164,7 @@ export function enqueueAnalysis(
 }
 
 export function fetchAdminUsers(token: string) {
-  return request<{ rows: Array<{ user_id: string; email?: string; created_at: string; user_created_at?: string }> }>(
-    "/admin/users",
-    token
-  );
+  return request<{ rows: AdminUserRow[] }>("/admin/users", token);
 }
 
 export function addAdminUser(
@@ -154,6 +196,12 @@ export function removeAdminUser(token: string, userId: string) {
   );
 }
 
-export function fetchSystemUsers(token: string) {
-  return request<{ rows: SystemUserRow[] }>("/admin/system-users", token);
+export function fetchSystemUsers(token: string, params?: SystemUsersParams) {
+  const searchParams = new URLSearchParams();
+  if (params?.email) searchParams.set("email", params.email);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  const suffix = searchParams.toString();
+  const path = suffix ? `/admin/system-users?${suffix}` : "/admin/system-users";
+  return request<{ rows: SystemUserRow[]; total: number }>(path, token);
 }

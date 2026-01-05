@@ -472,7 +472,11 @@ export async function listAdminVideos(
   pool: DbPool,
   params: {
     userId?: string;
+    playlistId?: string;
     syncStatus?: string;
+    analysisStatus?: string;
+    youtubeVideoId?: string;
+    title?: string;
     limit?: number;
     offset?: number;
   }
@@ -485,9 +489,33 @@ export async function listAdminVideos(
     conditions.push(`p.user_id = $${values.length}`);
   }
 
+  if (params.playlistId) {
+    values.push(params.playlistId);
+    conditions.push(`v.playlist_id = $${values.length}`);
+  }
+
   if (params.syncStatus) {
     values.push(params.syncStatus);
     conditions.push(`v.sync_status = $${values.length}`);
+  }
+
+  if (params.analysisStatus) {
+    if (params.analysisStatus === "none") {
+      conditions.push(`la.status is null`);
+    } else {
+      values.push(params.analysisStatus);
+      conditions.push(`la.status = $${values.length}`);
+    }
+  }
+
+  if (params.youtubeVideoId) {
+    values.push(params.youtubeVideoId);
+    conditions.push(`v.youtube_video_id = $${values.length}`);
+  }
+
+  if (params.title) {
+    values.push(`%${params.title}%`);
+    conditions.push(`v.title ilike $${values.length}`);
   }
 
   const limit = params.limit ?? 50;
