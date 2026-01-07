@@ -22,7 +22,6 @@ import { buildSupabaseClient } from "./supabase.js";
 import { buildServer } from "./server.js";
 import { createDbPool } from "./db.js";
 import { registerWorkers } from "./workers.js";
-import { scheduleKickoff } from "./queue.js";
 
 function isValidDatabaseUrl(databaseUrl: string) {
   try {
@@ -127,7 +126,6 @@ async function start() {
   }
 
   await registerWorkers({ boss, db, logger, config: configObj });
-  await scheduleKickoff(boss, configObj, logger);
 
   const app = await buildServer({ config: configObj, logger, boss, db, supabase });
   await app.listen({ port: configObj.port, host: "0.0.0.0" });

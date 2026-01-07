@@ -10,15 +10,10 @@ import type { Config } from "./config.js";
 import { enqueueAnalyses, fetchAnalysisCandidates } from "./analysis.js";
 import { createAdminGuard } from "./admin-auth.js";
 import {
-  getJobRunById,
   getPlaylistForAnalysis,
   listAdminVideos,
-  listJobRuns,
-  listSyncRuns,
-  updateJobRunById,
   type DbPool
 } from "./db.js";
-import { buildSyncPlaylistJobOptions } from "./queue.js";
 
 type YoutubeAccountRow = {
   id: string;
@@ -323,12 +318,6 @@ export async function buildServer(params: {
     };
   });
 
-  app.get("/admin/sync-runs", { preHandler: requireAdmin }, async (request) => {
-    const limit = Number((request.query as { limit?: string }).limit ?? 50);
-    const rows = await listSyncRuns(db, Number.isFinite(limit) ? limit : 50);
-    return { rows };
-  });
-
   app.get("/admin/videos", { preHandler: requireAdmin }, async (request, reply) => {
     const query = request.query as Record<string, string | string[] | undefined>;
     const userId = parseOptionalQueryString(query.userId);
@@ -360,58 +349,6 @@ export async function buildServer(params: {
     });
 
     return { rows };
-  });
-
-  app.get("/admin/sync-runs/:id/job-runs", { preHandler: requireAdmin }, async (request) => {
-    const params = request.params as { id: string };
-    const limit = Number((request.query as { limit?: string }).limit ?? 50);
-    const rows = await listJobRuns(db, {
-      syncRunId: params.id,
-      limit: Number.isFinite(limit) ? limit : 50
-    });
-    return { rows };
-  });
-
-  app.post("/admin/job-runs/:id/retry", { preHandler: requireAdmin }, async (request, reply) => {
-    const params = request.params as { id: string };
-    const jobRun = await getJobRunById(db, params.id);
-
-    if (!jobRun) {
-      reply.code(404);
-      return { error: "not_found" };
-    }
-
-    if (!jobRun.playlist_id) {
-      reply.code(400);
-      return { error: "missing_playlist" };
-    }
-
-    const bossJobId = await boss.send(
-      "sync.playlist",
-      {
-        syncRunId: jobRun.sync_run_id,
-        playlistId: jobRun.playlist_id,
-        userId: jobRun.user_id,
-        jobRunId: jobRun.id
-      },
-      buildSyncPlaylistJobOptions(jobRun.playlist_id)
-    );
-
-    if (!bossJobId) {
-      reply.code(409);
-      return { error: "deduped" };
-    }
-
-    await updateJobRunById(db, jobRun.id, {
-      status: "queued",
-      startedAt: null,
-      finishedAt: null,
-      error: null,
-      result: null,
-      bossJobId
-    });
-
-    return { bossJobId };
   });
 
   app.post("/admin/analysis", { preHandler: requireAdmin }, async (request, reply) => {

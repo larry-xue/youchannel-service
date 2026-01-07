@@ -4,35 +4,14 @@ import { chat, type StreamChunk } from "@tanstack/ai";
 import { createGeminiChat } from "@tanstack/ai-gemini";
 import { captureException } from "./sentry.js";
 import type { Config } from "./config.js";
-import {
-  getPlaylistWithAccount,
-  insertJobRun,
-  insertSyncRun,
-  reservePlaylistsForSync,
-  updateJobRunById,
-  updatePlaylistEntryStatus,
-  updatePlaylistLastSyncedAt,
-  updateSyncRun,
-  updateYoutubeAccountTokens,
-  type DbPool
-} from "./db.js";
-import { buildSyncPlaylistJobOptions } from "./queue.js";
-import {
-  fetchPlaylistItems,
-  fetchVideoDetails,
-  refreshAccessToken,
-  type PlaylistItem,
-  OAuthTokenError,
-  YouTubeApiError
-} from "./youtube.js";
+import type { DbPool } from "./db.js";
 
-const VIDEO_UPSERT_CHUNK_SIZE = 100;
-const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
 const ANALYSIS_MAX_DURATION_SEC = 3600;
 const ANALYSIS_PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
 const ANALYSIS_SUMMARY_MIN_LENGTH = 20;
 const ANALYSIS_TIMESTAMP_PATTERN = "^\\d{2}:\\d{2}$|^\\d{1,2}:\\d{2}:\\d{2}$";
 const ANALYSIS_TIMESTAMP_REGEX = /^(?:\d{2}:\d{2}|\d{1,2}:\d{2}:\d{2})$/;
+// eslint-disable-next-line @typescript-eslint/naming-convention
 const ANALYSIS_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -67,22 +46,181 @@ const ANALYSIS_OUTPUT_SCHEMA = {
         },
         required: ["timestamp", "title", "details"]
       }
+    },
+    characters: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: {
+            type: "string",
+            minLength: 1,
+            description: "Name of the character or 'Unknown Speaker N'."
+          },
+          kind: {
+            type: "string",
+            enum: ["host", "guest", "narrator", "character", "unknown"],
+            description: "Role type of the character."
+          },
+          description: {
+            type: "string",
+            minLength: 1,
+            description: "Brief description of the character."
+          },
+          traits: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 2,
+            maxItems: 6,
+            description: "2-6 short tags describing the character."
+          },
+          speaking_style: {
+            type: "string",
+            minLength: 1,
+            description: "Description of how the character speaks."
+          },
+          notable_topics: {
+            type: "array",
+            items: { type: "string" },
+            description: "Topics the character discusses."
+          },
+          evidence: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                timestamp: {
+                  type: "string",
+                  pattern: ANALYSIS_TIMESTAMP_PATTERN,
+                  description: "Timestamp of the quote."
+                },
+                quote: {
+                  type: "string",
+                  maxLength: 200,
+                  description: "Short quote (<= 20 words)."
+                }
+              },
+              required: ["timestamp", "quote"]
+            },
+            minItems: 1,
+            maxItems: 3,
+            description: "1-3 short quotes with timestamps."
+          }
+        },
+        required: ["name", "kind", "description", "traits", "speaking_style", "notable_topics", "evidence"]
+      },
+      maxItems: 8,
+      description: "0-8 main characters/speakers in the video."
+    },
+    transcript: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        language: {
+          type: "string",
+          minLength: 1,
+          description: "Language of the transcript."
+        },
+        is_truncated: {
+          type: "boolean",
+          description: "Whether the transcript is truncated."
+        },
+        cursor: {
+          type: "string",
+          description: "Cursor for pagination, empty if not truncated."
+        },
+        segments: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              start: {
+                type: "string",
+                pattern: ANALYSIS_TIMESTAMP_PATTERN,
+                description: "Start timestamp."
+              },
+              end: {
+                type: "string",
+                pattern: ANALYSIS_TIMESTAMP_PATTERN,
+                description: "End timestamp."
+              },
+              speaker: {
+                type: "string",
+                description: "Speaker name or identifier."
+              },
+              text: {
+                type: "string",
+                minLength: 1,
+                description: "Transcript text (1-2 sentences)."
+              }
+            },
+            required: ["start", "end", "speaker", "text"]
+          },
+          description: "Chronological transcript segments."
+        }
+      },
+      required: ["language", "is_truncated", "cursor", "segments"],
+      description: "Transcript with speaker diarization."
     }
   },
-  required: ["summarize", "wiki"]
+  required: ["summarize", "wiki", "characters", "transcript"]
 };
 
 const ANALYSIS_PROMPT_BASE = [
-  "You are analyzing a YouTube video based on its transcript and metadata.",
   "Return ONLY a valid JSON object (RFC 8259). Use double quotes for all keys and strings.",
-  "The JSON must match exactly this schema: {\"summarize\": string, \"wiki\": [{\"timestamp\": string, \"title\": string, \"details\": string}]}",
-  "Do not include any extra keys, comments, or surrounding text.",
-  "\"summarize\" must be 3-6 sentences covering the main thesis and key takeaways (no bullet points).",
-  "\"wiki\" must be chronological (non-decreasing timestamps) and have 6-12 items when possible.",
-  "Each \"timestamp\" must match ^\\d{2}:\\d{2}$ or ^\\d{1,2}:\\d{2}:\\d{2}$.",
-  "Each \"details\" should be 1-3 sentences with concrete points from that segment; do not repeat the summary verbatim.",
-  "Use the same language as the video or the user's prompt.",
-  "Do not invent facts. If the transcript is unclear for a segment, say so in \"details\" without adding new fields."
+  "Do not include any extra keys, markdown, code fences, comments, or surrounding text.",
+  "",
+  "The JSON must match exactly this schema:",
+  "{",
+  "  \"summarize\": string,",
+  "  \"wiki\": [{\"timestamp\": string, \"title\": string, \"details\": string}],",
+  "  \"characters\": [{",
+  "    \"name\": string,",
+  "    \"kind\": \"host\"|\"guest\"|\"narrator\"|\"character\"|\"unknown\",",
+  "    \"description\": string,",
+  "    \"traits\": [string],",
+  "    \"speaking_style\": string,",
+  "    \"notable_topics\": [string],",
+  "    \"evidence\": [{\"timestamp\": string, \"quote\": string}],",
+  "  }],",
+  "  \"transcript\": {",
+  "    \"language\": string,",
+  "    \"is_truncated\": boolean,",
+  "    \"cursor\": string,",
+  "    \"segments\": [{\"start\": string, \"end\": string, \"speaker\": string, \"text\": string}]",
+  "  }",
+  "}",
+  "",
+  "General rules:",
+  "- Always use English, regardless of the video's language or the user's prompt language.",
+  "- Do not invent facts.",
+  "",
+  "\"summarize\":",
+  "- 3-6 sentences covering the main thesis and key takeaways. No bullet points.",
+  "",
+  "\"wiki\":",
+  "- Chronological (non-decreasing timestamps), 6-12 items when possible.",
+  "- \"timestamp\" must match ^\\d{2}:\\d{2}$ or ^\\d{1,2}:\\d{2}:\\d{2}$.",
+  "- \"details\" must be 1-3 sentences with concrete points; do not repeat the summary verbatim.",
+  "- If unclear, say so in \"details\".",
+  "",
+  "\"characters\":",
+  "- 0-8 items. If no clear main speakers/roles, return [].",
+  "- Do not include people only mentioned in passing.",
+  "- If name is unknown, use \"Unknown Speaker 1\", \"Unknown Speaker 2\", etc.",
+  "- \"traits\": 2-6 short tags.",
+  "- \"evidence\": 1-3 short quotes (<= 20 words each) with timestamps.",
+  "",
+  "\"transcript\":",
+  "- \"segments\" must be chronological.",
+  "- \"start\" and \"end\" timestamps must match the same timestamp regex.",
+  "- Keep each \"text\" concise (1-2 sentences).",
+  "- Return as much transcript as possible within the output limit.",
+  "- If not all transcript can be returned, set \"is_truncated\" to true and set a non-empty \"cursor\" that can be used to continue from where you stopped.",
+  "- If all transcript is covered, set \"is_truncated\" to false and set \"cursor\" to \"\"."
 ].join("\n");
 
 const ANALYSIS_STATUS = {
@@ -101,22 +239,6 @@ const ANALYSIS_MUTABLE_STATUSES: AnalysisStatus[] = [
   ANALYSIS_STATUS.pending,
   ANALYSIS_STATUS.failed
 ];
-type SyncPlaylistPayload = {
-  syncRunId: string;
-  playlistId: string;
-  userId?: string | null;
-  jobRunId: string;
-};
-
-type UpsertVideo = {
-  youtubeVideoId: string;
-  title: string | null;
-  description: string | null;
-  publishedAt: string | null;
-  thumbnailUrl: string | null;
-  duration: string | null;
-  raw: Record<string, unknown> | null;
-};
 
 type AnalyzeVideoPayload = {
   videoId: string;
@@ -155,25 +277,8 @@ type AnalysisOutput = {
 
 type GeminiModel = Parameters<typeof createGeminiChat>[0];
 
-function pickThumbnailUrl(thumbnails?: Record<string, { url?: string }>) {
-  const order = ["maxres", "standard", "high", "medium", "default"];
-  for (const key of order) {
-    const url = thumbnails?.[key]?.url;
-    if (url) return url;
-  }
-  return null;
-}
-
 function normalizeJobList<T>(jobs: JobWithMetadata<T>[] | JobWithMetadata<T>) {
   return Array.isArray(jobs) ? jobs : [jobs];
-}
-
-function shouldRefreshAccessToken(accessToken: string | null, expiresAt: string | Date | null) {
-  if (!accessToken) return true;
-  if (!expiresAt) return false;
-  const expiresMs = expiresAt instanceof Date ? expiresAt.getTime() : Date.parse(expiresAt);
-  if (Number.isNaN(expiresMs)) return false;
-  return expiresMs <= Date.now() + ACCESS_TOKEN_REFRESH_SKEW_MS;
 }
 
 function parseDurationToSeconds(value?: string | null) {
@@ -186,7 +291,7 @@ function parseDurationToSeconds(value?: string | null) {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
-function buildAnalysisPrompt(prompt: string) {
+function buildAnalysisPrompt() {
   return ANALYSIS_PROMPT_BASE;
 }
 
@@ -358,7 +463,7 @@ function classifyGeminiError(error: unknown) {
   const code = typeof (error as { code?: unknown })?.code === "string"
     ? (error as { code?: string }).code
     : null;
-  const isTimeout = Boolean(code && RETRYABLE_ERROR_CODES.has(code)) || /timed?\\s*out/i.test(message);
+  const isTimeout = Boolean(code && RETRYABLE_ERROR_CODES.has(code)) || /timed?\s*out/i.test(message);
   const retryable = isTimeout || status === 429 || (typeof status === "number" && status >= 500);
   return { message, status, retryable };
 }
@@ -393,63 +498,6 @@ async function fetchAnalysisRecord(db: DbPool, videoId: string, promptHash: stri
     [videoId, promptHash]
   );
   return result.rows[0] ?? null;
-}
-
-async function upsertVideoAnalysis(db: DbPool, params: {
-  videoId: string;
-  playlistId: string;
-  userId: string;
-  prompt: string;
-  promptHash: string;
-  status: AnalysisStatus;
-  model: string;
-  analysisText: string;
-  usage: Record<string, unknown> | null;
-  error: string | null;
-  skipReason: string | null;
-}) {
-  const result = await db.query<{ id: string }>(
-    `insert into video_analyses (
-       video_id,
-       playlist_id,
-       user_id,
-       prompt,
-       prompt_hash,
-       analysis_text,
-       model,
-       usage,
-       status,
-       error,
-       skip_reason
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-     on conflict (video_id, prompt_hash)
-     do update set
-       playlist_id = excluded.playlist_id,
-       user_id = excluded.user_id,
-       prompt = excluded.prompt,
-       analysis_text = excluded.analysis_text,
-       model = excluded.model,
-       usage = excluded.usage,
-       status = excluded.status,
-       error = excluded.error,
-       skip_reason = excluded.skip_reason
-     returning id`,
-    [
-      params.videoId,
-      params.playlistId,
-      params.userId,
-      params.prompt,
-      params.promptHash,
-      params.analysisText,
-      params.model,
-      params.usage,
-      params.status,
-      params.error,
-      params.skipReason
-    ]
-  );
-
-  return result.rows[0]?.id ?? null;
 }
 
 async function upsertVideoAnalysisIfStatus(
@@ -582,12 +630,13 @@ async function generateGeminiAnalysis(params: {
           },
           {
             type: "text",
-            content: buildAnalysisPrompt(params.prompt)
+            content: buildAnalysisPrompt()
           }
         ]
       }
     ],
     temperature: 0.2,
+    topP: 0.9,
     maxTokens: 65536,
     modelOptions: {
       generationConfig: {
@@ -600,106 +649,6 @@ async function generateGeminiAnalysis(params: {
   return collectStream(stream);
 }
 
-async function upsertVideos(
-  db: DbPool,
-  playlistId: string,
-  items: UpsertVideo[],
-  seenAt: Date
-) {
-  const map = new Map<string, string>();
-
-  for (let i = 0; i < items.length; i += VIDEO_UPSERT_CHUNK_SIZE) {
-    const chunk = items.slice(i, i + VIDEO_UPSERT_CHUNK_SIZE);
-    if (chunk.length === 0) continue;
-
-    const values: Array<string | Date | null | Record<string, unknown>> = [];
-    const placeholders = chunk.map((item, index) => {
-      const offset = index * 11;
-      values.push(
-        playlistId,
-        item.youtubeVideoId,
-        item.title,
-        item.description,
-        item.publishedAt,
-        item.thumbnailUrl,
-        item.duration,
-        item.raw,
-        "synced",
-        null,
-        seenAt
-      );
-      return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11})`;
-    });
-
-    const result = await db.query(
-      `insert into videos (
-         playlist_id,
-         youtube_video_id,
-         title,
-         description,
-         published_at,
-         thumbnail_url,
-         duration,
-         raw,
-         sync_status,
-         removed_at,
-         last_seen_at
-       ) values ${placeholders.join(", ")}
-       on conflict (playlist_id, youtube_video_id)
-       do update set
-         title = excluded.title,
-         description = excluded.description,
-         published_at = excluded.published_at,
-         thumbnail_url = excluded.thumbnail_url,
-         duration = excluded.duration,
-         raw = excluded.raw,
-         sync_status = 'synced',
-         removed_at = null,
-         last_seen_at = excluded.last_seen_at
-       returning id, youtube_video_id`,
-      values
-    );
-
-    for (const row of result.rows as Array<{ id: string; youtube_video_id: string }>) {
-      map.set(row.youtube_video_id, row.id);
-    }
-  }
-
-  return map;
-}
-
-async function markRemovedVideos(db: DbPool, playlistId: string, videoIds: string[], removedAt: Date) {
-  const result = await db.query(
-    `update videos
-     set sync_status = 'removed',
-         removed_at = $2
-     where playlist_id = $1
-       and sync_status = 'synced'
-       and not (youtube_video_id = any($3::text[]))`,
-    [playlistId, removedAt, videoIds]
-  );
-
-  return result.rowCount ?? 0;
-}
-
-async function fetchExistingVideoStatuses(db: DbPool, playlistId: string, videoIds: string[]) {
-  if (videoIds.length === 0) return new Map<string, string>();
-
-  const result = await db.query(
-    `select youtube_video_id, sync_status
-     from videos
-     where playlist_id = $1
-       and youtube_video_id = any($2::text[])`,
-    [playlistId, videoIds]
-  );
-
-  const map = new Map<string, string>();
-  for (const row of result.rows as Array<{ youtube_video_id: string; sync_status: string }>) {
-    map.set(row.youtube_video_id, row.sync_status);
-  }
-  return map;
-}
-
 export async function registerWorkers(params: {
   boss: PgBoss;
   db: DbPool;
@@ -708,372 +657,8 @@ export async function registerWorkers(params: {
 }) {
   const { boss, db, logger, config } = params;
 
-  // Ensure queues exist before registering workers
-  await boss.createQueue("kickoff");
-  await boss.createQueue("sync.playlist");
+  // Ensure queue exists before registering worker
   await boss.createQueue("analyze.video");
-
-  await boss.work("kickoff", async (job: any) => {
-    const kickoffSource = (job.data as { source?: string } | null)?.source ?? "schedule";
-    const requestedBy = (job.data as { requestedBy?: string } | null)?.requestedBy ?? null;
-
-    const syncRun = await insertSyncRun(db, {
-      kickoffSource,
-      meta: { kickoffJobId: job.id, requestedBy }
-    });
-
-    await updateSyncRun(db, syncRun.id, { status: "running", startedAt: new Date() });
-
-    try {
-      const playlists = await reservePlaylistsForSync(db, {
-        limit: config.kickoffBatchLimit,
-        defaultIntervalSec: config.syncIntervalSec
-      });
-
-      let enqueued = 0;
-      let skipped = 0;
-
-      for (const playlist of playlists) {
-        const jobRun = await insertJobRun(db, {
-          syncRunId: syncRun.id,
-          jobName: "sync.playlist",
-          status: "queued",
-          playlistId: playlist.id,
-          userId: playlist.user_id
-        });
-
-        const bossJobId = await boss.send(
-          "sync.playlist",
-          {
-            syncRunId: syncRun.id,
-            playlistId: playlist.id,
-            userId: playlist.user_id,
-            jobRunId: jobRun.id
-          },
-          buildSyncPlaylistJobOptions(playlist.id)
-        );
-
-        if (bossJobId) {
-          await updateJobRunById(db, jobRun.id, { bossJobId });
-          enqueued += 1;
-        } else {
-          await updateJobRunById(db, jobRun.id, {
-            status: "skipped",
-            finishedAt: new Date(),
-            error: "deduped",
-            result: { reason: "deduped" }
-          });
-          skipped += 1;
-        }
-      }
-
-      await updateSyncRun(db, syncRun.id, {
-        status: "succeeded",
-        finishedAt: new Date(),
-        meta: {
-          kickoffJobId: job.id,
-          requestedBy,
-          kickoffSource,
-          batchLimit: config.kickoffBatchLimit,
-          enqueued,
-          skipped
-        }
-      });
-
-      logger.info({ syncRunId: syncRun.id, enqueued, skipped }, "Kickoff enqueued playlist sync jobs");
-      return { syncRunId: syncRun.id, enqueued, skipped };
-    } catch (error) {
-      await updateSyncRun(db, syncRun.id, {
-        status: "failed",
-        finishedAt: new Date(),
-        meta: {
-          kickoffJobId: job.id,
-          requestedBy,
-          kickoffSource,
-          error: error instanceof Error ? error.message : "unknown_error"
-        }
-      });
-      captureException(error);
-      logger.error({ syncRunId: syncRun.id, err: error }, "Kickoff failed");
-      throw error;
-    }
-  });
-
-  await boss.work("sync.playlist", { includeMetadata: true }, async (jobs) => {
-    logger.info({ jobsCount: jobs.length }, "sync.playlist jobs received");
-    const jobList = normalizeJobList(jobs);
-
-    for (const job of jobList) {
-      const payload = job.data as SyncPlaylistPayload | null;
-      const syncRunId = payload?.syncRunId;
-      const playlistId = payload?.playlistId;
-      const jobRunId = payload?.jobRunId;
-
-      if (!syncRunId || !playlistId || !jobRunId) {
-        logger.error({ jobId: job.id }, "sync.playlist missing required payload");
-        throw new Error("sync.playlist missing required payload");
-      }
-
-      const attempt = typeof job.retryCount === "number" ? job.retryCount + 1 : 1;
-      await updateJobRunById(db, jobRunId, {
-        status: "running",
-        startedAt: new Date(),
-        attempt,
-        error: null,
-        result: null
-      });
-
-      const playlist = await getPlaylistWithAccount(db, playlistId);
-      if (!playlist) {
-        await updateJobRunById(db, jobRunId, {
-          status: "skipped",
-          finishedAt: new Date(),
-          error: "playlist_missing",
-          result: { reason: "playlist_missing" }
-        });
-        continue;
-      }
-
-      if (playlist.entry_status !== "active") {
-        await updateJobRunById(db, jobRunId, {
-          status: "skipped",
-          finishedAt: new Date(),
-          error: "playlist_inactive",
-          result: { reason: "playlist_inactive" }
-        });
-        continue;
-      }
-
-      let accessToken = playlist.access_token;
-      const needsRefresh = shouldRefreshAccessToken(accessToken, playlist.expires_at);
-
-      if (needsRefresh && playlist.refresh_token) {
-        const clientId = config.youtubeOAuthClientId;
-        const clientSecret = config.youtubeOAuthClientSecret;
-
-        if (!clientId || !clientSecret) {
-          await updateJobRunById(db, jobRunId, {
-            status: "failed",
-            finishedAt: new Date(),
-            error: "oauth_config_missing",
-            result: { reason: "oauth_config_missing" }
-          });
-          logger.error({ syncRunId, jobRunId, playlistId }, "Missing OAuth client config for refresh");
-          continue;
-        }
-
-        try {
-          const refreshed = await refreshAccessToken({
-            clientId,
-            clientSecret,
-            refreshToken: playlist.refresh_token
-          });
-
-          const tokenUpdates: {
-            accessToken: string;
-            refreshToken?: string | null;
-            expiresAt?: Date | null;
-            scope?: string | null;
-            tokenType?: string | null;
-          } = { accessToken: refreshed.access_token };
-
-          const expiresIn = typeof refreshed.expires_in === "number" ? refreshed.expires_in : Number.NaN;
-          if (Number.isFinite(expiresIn)) {
-            tokenUpdates.expiresAt = new Date(Date.now() + expiresIn * 1000);
-          }
-
-          if (refreshed.refresh_token) {
-            tokenUpdates.refreshToken = refreshed.refresh_token;
-          }
-          if (refreshed.scope !== undefined) {
-            tokenUpdates.scope = refreshed.scope ?? null;
-          }
-          if (refreshed.token_type !== undefined) {
-            tokenUpdates.tokenType = refreshed.token_type ?? null;
-          }
-
-          if (playlist.youtube_account_id) {
-            await updateYoutubeAccountTokens(db, playlist.youtube_account_id, tokenUpdates);
-          }
-
-          accessToken = refreshed.access_token;
-          logger.info(
-            { syncRunId, jobRunId, playlistId, youtubeAccountId: playlist.youtube_account_id },
-            "YouTube access token refreshed"
-          );
-        } catch (error) {
-          const finishedAt = new Date();
-          if (error instanceof OAuthTokenError) {
-            await updateJobRunById(db, jobRunId, {
-              status: "failed",
-              finishedAt,
-              error: "oauth_refresh_failed",
-              result: {
-                httpStatus: error.status,
-                reason: error.error ?? error.message,
-                description: error.errorDescription
-              }
-            });
-
-            if (error.status === 429 || (typeof error.status === "number" && error.status >= 500)) {
-              captureException(error);
-              logger.error(
-                { syncRunId, jobRunId, playlistId, err: error },
-                "OAuth refresh retryable error"
-              );
-              throw error;
-            }
-
-            logger.warn(
-              { syncRunId, jobRunId, playlistId, err: error },
-              "OAuth refresh failed"
-            );
-            continue;
-          }
-
-          await updateJobRunById(db, jobRunId, {
-            status: "failed",
-            finishedAt,
-            error: "oauth_refresh_failed",
-            result: { reason: error instanceof Error ? error.message : "unknown_error" }
-          });
-          captureException(error);
-          logger.error({ syncRunId, jobRunId, playlistId, err: error }, "OAuth refresh failed");
-          throw error;
-        }
-      }
-
-      if (!accessToken) {
-        await updateJobRunById(db, jobRunId, {
-          status: "skipped",
-          finishedAt: new Date(),
-          error: "auth_missing",
-          result: { reason: "auth_missing" }
-        });
-        continue;
-      }
-
-      const startedAt = Date.now();
-      try {
-        const { items } = await fetchPlaylistItems(accessToken, playlist.playlist_id);
-        const idMap = new Map<string, PlaylistItem>();
-        const videoIds: string[] = [];
-
-        for (const item of items) {
-          const videoId = item.contentDetails?.videoId ?? item.snippet?.resourceId?.videoId;
-          if (!videoId || idMap.has(videoId)) continue;
-          idMap.set(videoId, item);
-          videoIds.push(videoId);
-        }
-
-        const videoDetails = await fetchVideoDetails(accessToken, videoIds);
-        const seenAt = new Date();
-
-        const existingStatuses = await fetchExistingVideoStatuses(db, playlist.id, videoIds);
-        const newVideoIds = videoIds.filter((id) => {
-          const status = existingStatuses.get(id);
-          return !status || status !== "synced";
-        });
-
-        const upsertRows: UpsertVideo[] = videoIds.map((videoId) => {
-          const item = idMap.get(videoId);
-          const snippet = item?.snippet;
-          const details = videoDetails.get(videoId);
-          return {
-            youtubeVideoId: videoId,
-            title: snippet?.title ?? null,
-            description: snippet?.description ?? null,
-            publishedAt: snippet?.publishedAt ?? null,
-            thumbnailUrl: pickThumbnailUrl(snippet?.thumbnails),
-            duration: details?.contentDetails?.duration ?? null,
-            raw: {
-              playlistItem: item ?? null,
-              video: details ?? null
-            }
-          };
-        });
-
-        await upsertVideos(db, playlist.id, upsertRows, seenAt);
-        const removedCount = await markRemovedVideos(db, playlist.id, videoIds, seenAt);
-        await updatePlaylistLastSyncedAt(db, playlist.id, seenAt);
-
-        const durationMs = Date.now() - startedAt;
-        const result = {
-          fetchedCount: videoIds.length,
-          newCount: newVideoIds.length,
-          removedCount,
-          durationMs,
-          etagHit: false,
-          analysesEnqueued: 0,
-          analysesSkipped: 0,
-          analysisSkipReasons: {}
-        };
-
-        await updateJobRunById(db, jobRunId, {
-          status: "succeeded",
-          finishedAt: new Date(),
-          result
-        });
-        logger.info(
-          { syncRunId, jobRunId, playlistId, result },
-          "Playlist sync completed"
-        );
-      } catch (error) {
-        if (error instanceof YouTubeApiError) {
-          if (error.status === 404) {
-            await updatePlaylistEntryStatus(db, playlist.id, "lost");
-            await updateJobRunById(db, jobRunId, {
-              status: "skipped",
-              finishedAt: new Date(),
-              error: "playlist_missing",
-              result: { httpStatus: error.status, reason: error.reason }
-            });
-            continue;
-          }
-
-          if (error.status === 401 || error.status === 403) {
-            await updatePlaylistEntryStatus(db, playlist.id, "auth_invalid");
-            await updateJobRunById(db, jobRunId, {
-              status: "skipped",
-              finishedAt: new Date(),
-              error: "auth_invalid",
-              result: { httpStatus: error.status, reason: error.reason }
-            });
-            continue;
-          }
-
-          if (error.status === 429 || error.status >= 500) {
-            await updateJobRunById(db, jobRunId, {
-              status: "failed",
-              finishedAt: new Date(),
-              error: error.message,
-              result: { httpStatus: error.status, reason: error.reason }
-            });
-            captureException(error);
-            logger.error({ syncRunId, jobRunId, playlistId, err: error }, "Playlist sync retryable error");
-            throw error;
-          }
-
-          await updateJobRunById(db, jobRunId, {
-            status: "failed",
-            finishedAt: new Date(),
-            error: error.message,
-            result: { httpStatus: error.status, reason: error.reason }
-          });
-          continue;
-        }
-
-        await updateJobRunById(db, jobRunId, {
-          status: "failed",
-          finishedAt: new Date(),
-          error: error instanceof Error ? error.message : "unknown error"
-        });
-        captureException(error);
-        logger.error({ syncRunId, jobRunId, playlistId, err: error }, "Playlist sync failed");
-        throw error;
-      }
-    }
-  });
 
   const handleAnalyzeVideoJob = async (job: any) => {
     const payload = job.data as AnalyzeVideoPayload | null;

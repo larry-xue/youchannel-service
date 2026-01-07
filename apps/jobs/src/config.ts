@@ -8,15 +8,8 @@ const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   ADMIN_ORIGIN: z.string().min(1).default("http://localhost:5173"),
   OPENAPI_SHARED_KEY: z.string().min(1),
-  YOUTUBE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
-  YOUTUBE_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
-  GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
-  GOOGLE_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
   GEMINI_API_KEY: z.string().min(1).optional(),
   GEMINI_MODEL: z.string().min(1).optional(),
-  KICKOFF_CRON: z.string().optional(),
-  KICKOFF_BATCH_LIMIT: z.coerce.number().int().positive().default(50),
-  SYNC_INTERVAL_SEC: z.coerce.number().int().positive().default(3600),
   LOG_LEVEL: z.string().default("info"),
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENV: z.string().optional()
@@ -30,13 +23,8 @@ export type Config = {
   supabaseServiceRoleKey: string;
   adminOrigin: string;
   openapiSharedKey: string;
-  youtubeOAuthClientId?: string;
-  youtubeOAuthClientSecret?: string;
   geminiApiKey?: string;
   geminiModel: string;
-  kickoffCron?: string;
-  kickoffBatchLimit: number;
-  syncIntervalSec: number;
   logLevel: string;
   sentryDsn?: string;
   sentryEnv?: string;
@@ -49,11 +37,6 @@ export function loadConfig(): Config {
     throw new Error(`Invalid environment configuration: ${JSON.stringify(formatted)}`);
   }
 
-  const youtubeOAuthClientId =
-    parsed.data.YOUTUBE_OAUTH_CLIENT_ID ?? parsed.data.GOOGLE_OAUTH_CLIENT_ID;
-  const youtubeOAuthClientSecret =
-    parsed.data.YOUTUBE_OAUTH_CLIENT_SECRET ?? parsed.data.GOOGLE_OAUTH_CLIENT_SECRET;
-
   return {
     nodeEnv: parsed.data.NODE_ENV,
     port: parsed.data.PORT,
@@ -62,13 +45,8 @@ export function loadConfig(): Config {
     supabaseServiceRoleKey: parsed.data.SUPABASE_SERVICE_ROLE_KEY,
     adminOrigin: parsed.data.ADMIN_ORIGIN,
     openapiSharedKey: parsed.data.OPENAPI_SHARED_KEY,
-    youtubeOAuthClientId,
-    youtubeOAuthClientSecret,
     geminiApiKey: parsed.data.GEMINI_API_KEY,
     geminiModel: parsed.data.GEMINI_MODEL ?? "gemini-1.5-flash",
-    kickoffCron: parsed.data.KICKOFF_CRON,
-    kickoffBatchLimit: parsed.data.KICKOFF_BATCH_LIMIT,
-    syncIntervalSec: parsed.data.SYNC_INTERVAL_SEC,
     logLevel: parsed.data.LOG_LEVEL,
     sentryDsn: parsed.data.SENTRY_DSN,
     sentryEnv: parsed.data.SENTRY_ENV
