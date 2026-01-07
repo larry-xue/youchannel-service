@@ -108,29 +108,16 @@ export type AdminVideoRow = {
   analysis_updated_at: string | null;
 };
 
-export function fetchSyncRuns(token: string, limit = 50) {
-  return request<{ rows: Array<Record<string, unknown>> }>(`/admin/sync-runs?limit=${limit}`, token);
-}
-
-export function fetchJobRuns(token: string, syncRunId: string, limit = 50) {
-  const searchParams = new URLSearchParams();
-  if (limit) {
-    searchParams.set("limit", String(limit));
-  }
-  const suffix = searchParams.toString();
-  const path = suffix
-    ? `/admin/sync-runs/${syncRunId}/job-runs?${suffix}`
-    : `/admin/sync-runs/${syncRunId}/job-runs`;
-  return request<{ rows: Array<Record<string, unknown>> }>(path, token);
-}
-
-export function retryJobRun(token: string, jobRunId: string) {
-  return request<{ bossJobId: string | null }>(
-    `/admin/job-runs/${jobRunId}/retry`,
-    token,
-    { method: "POST" }
-  );
-}
+export type AdminVideosParams = {
+  userId?: string;
+  playlistId?: string;
+  youtubeVideoId?: string;
+  title?: string;
+  syncStatus?: string;
+  analysisStatus?: string;
+  limit?: number;
+  offset?: number;
+};
 
 export function fetchAdminVideos(
   token: string,
