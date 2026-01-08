@@ -1,216 +1,221 @@
-# Jobs 鏈嶅姟涓氬姟閫昏緫鏂囨。
+# Jobs 服务业务逻辑文档
 
-## 绯荤粺姒傝堪
+## 系统概述
 
-Jobs 鏈嶅姟鏄竴涓熀浜?`pg-boss` 鐨勫紓姝ヤ换鍔″鐞嗙郴缁燂紝涓昏璐熻矗锛?
-1. 澶勭悊瑙嗛鍒嗘瀽浠诲姟
-2. 鎻愪緵绠＄悊鍚庡彴 API
+Jobs 服务是一个基于 `pg-boss` 的异步任务处理系统，主要负责：
+1. 处理视频分析任务
+2. 提供管理后台 API
 
-## 鏍稿績缁勪欢
+## 核心组件
 
-### 1. 浠诲姟闃熷垪绯荤粺
+### 1. 任务队列系统
 
-浣跨敤 `pg-boss` 浣滀负浠诲姟闃熷垪寮曟搸锛屽熀浜?PostgreSQL 瀹炵幇鍒嗗竷寮忎换鍔¤皟搴︺€?
+使用 `pg-boss` 作为任务队列引擎，基于 PostgreSQL 实现分布式任务调度。
 
-**涓昏闃熷垪锛?*
-- `analyze.video`: 瑙嗛鍒嗘瀽浠诲姟闃熷垪
+**主要队列：**
+- `analyze.video`: 视频分析任务队列
 
-### 2. 鏁版嵁搴撹繛鎺?
+### 2. 数据库连接
 
-- **PostgreSQL**: 涓绘暟鎹簱锛屽瓨鍌ㄤ笟鍔℃暟鎹拰浠诲姟鐘舵€?
-- **Supabase**: 鐢ㄤ簬鐢ㄦ埛璁よ瘉鍜岀鐞?
+- **PostgreSQL**: 主数据库，存储业务数据和任务状态
+- **Supabase**: 用于用户认证和管理
 
-## 鏍稿績涓氬姟娴佺▼
+## 核心业务流程
 
-### 娴佺▼ 1: 瑙嗛鍒嗘瀽浠诲姟鍏ラ槦锛坋nqueueAnalyses锛?
+### 流程 1: 视频分析任务入队（enqueueAnalyses）
 
-**瑙﹀彂鏃舵満锛?*
-- OpenAPI 鎺ュ彛鎵嬪姩瑙﹀彂
-- 鍚庡彴绠＄悊鍛樻帴鍙ｆ墜鍔ㄨЕ鍙?
+**触发时机：**
+- OpenAPI 接口手动触发
+- 后台管理员接口手动触发
 
-**澶勭悊閫昏緫锛?*
+**处理逻辑：**
 
 ```
-1. 绛涢€夊€欓€夎棰?
-   - 杩囨护鏃堕暱瓒呰繃 3600 绉掔殑瑙嗛
-   - 璁＄畻鎻愮ず璇嶅搱甯岋紙SHA256锛?
+1. 筛选候选视频
+   - 过滤时长超过 3600 秒的视频
+   - 计算提示词哈希（SHA256）
 
-2. 妫€鏌ュ凡瀛樺湪鐨勫垎鏋?
-   - 鏌ヨ video_analyses 琛?
-   - 杩囨护宸插瓨鍦ㄧ浉鍚?videoId + promptHash 鐨勮褰?
+2. 检查已存在的分析
+   - 查询 video_analyses 表
+   - 过滤已存在相同 videoId + promptHash 的记录
 
-3. 妫€鏌ョ敤鎴烽厤棰?
-   - 鏌ヨ user_quotas 琛?
-   - 璁＄畻鍓╀綑閰嶉锛歮ax_analyses - analysis_count
-   - 鍙叆闃熷墿浣欓厤棰濊寖鍥村唴鐨勮棰?
+3. 检查用户配额
+   - 查询 user_quotas 表
+   - 计算剩余配额：max_analyses - analysis_count
+   - 只入队剩余配额范围内的视频
 
-4. 鍙戦€佸垎鏋愪换鍔?
-   - 闃熷垪锛歛nalyze.video
-   - 鍗曚緥閿細analysis.{videoId}.{promptHash}
-   - 鏇存柊閰嶉璁℃暟
+4. 发送分析任务
+   - 队列：analyze.video
+   - 单例键：analysis.{videoId}.{promptHash}
+   - 更新配额计数
 
-5. 杩斿洖缁熻缁撴灉
-   - enqueued: 鎴愬姛鍏ラ槦鐨勬暟閲?
-   - skipped: 璺宠繃鐨勬暟閲?
-   - skipReasons: 璺宠繃鍘熷洜缁熻
+5. 返回统计结果
+   - enqueued: 成功入队的数量
+   - skipped: 跳过的数量
+   - skipReasons: 跳过原因统计
 ```
 
-### 娴佺▼ 2: 瑙嗛鍒嗘瀽浠诲姟澶勭悊锛坅nalyze.video worker锛?
+### 流程 2: 视频分析任务处理（analyze.video worker）
 
-**浠诲姟鍙傛暟锛?*
+**任务参数：**
 ```typescript
 {
   videoId: string;
+  playlistId: string;
   userId: string;
   prompt: string;
+  promptHash: string;
 }
 ```
 
-**鎵ц娴佺▼锛?*
+**执行流程：**
 
 ```
-1. 楠岃瘉瑙嗛
-   - 鏌ヨ瑙嗛淇℃伅
-   - 妫€鏌ヨ棰戞槸鍚﹀瓨鍦?
-   - 楠岃瘉 userId 鍖归厤
+1. 验证视频
+   - 查询视频信息
+   - 检查视频是否存在
+   - 验证 playlistId 和 userId 匹配
 
-2. 妫€鏌ョ幇鏈夊垎鏋愯褰?
-   - 璺宠繃宸插畬鎴愭垨姝ｅ湪澶勭悊鐨勫垎鏋?
-   - 鍥炴敹瓒呮椂鐨勫鐞嗕腑鐘舵€侊紙15鍒嗛挓锛?
+2. 检查现有分析记录
+   - 跳过已完成或正在处理的分析
+   - 回收超时的处理中状态（15分钟）
 
-3. 妫€鏌ヨ棰戞潯浠?
-   - 瑙嗛鏃堕暱涓嶈秴杩?3600 绉?
-   - 瑙嗛 status 涓?'active'
+3. 检查视频条件
+   - 视频时长不超过 3600 秒
+   - 视频 sync_status 为 'synced'
 
-4. 璋冪敤 Gemini API
-   - 浣跨敤瑙嗛 URL 鍜屽垎鏋?prompt
-   - 杩斿洖缁撴瀯鍖?JSON 缁撴灉
+4. 调用 Gemini API
+   - 使用视频 URL 和分析 prompt
+   - 返回结构化 JSON 结果
 
-5. 瑙ｆ瀽骞朵繚瀛樼粨鏋?
-   - 楠岃瘉杈撳嚭鏍煎紡
-   - 淇濆瓨鍒?video_analyses 琛?
+5. 解析并保存结果
+   - 验证输出格式
+   - 保存到 video_analyses 表
 
-6. 閿欒澶勭悊
-   - 鍙噸璇曢敊璇紙429/5xx/瓒呮椂锛夛細鎶涘嚭寮傚父瑙﹀彂閲嶈瘯
-   - 涓嶅彲閲嶈瘯閿欒锛氭爣璁颁负 failed锛岄€€杩橀厤棰?
+6. 错误处理
+   - 可重试错误（429/5xx/超时）：抛出异常触发重试
+   - 不可重试错误：标记为 failed，退还配额
 ```
 
-## 鏁版嵁搴撹〃缁撴瀯
+## 数据库表结构
 
-### 鏍稿績琛?
+### 核心表
 
-1. **videos**
-   - Stores video records.
-   - Key fields: `user_id` (owner), `status` (pending/active/error).
-   - Unique: `(user_id, youtube_video_id)`
+1. **playlists**
+   - 存储播放列表配置
+   - 关键字段：`entry_status`, `analysis_prompt`
 
-2. **video_analyses**
-   - Stores analysis records per video.
-   - Unique: `(video_id)` (one analysis per video).
+2. **videos**
+   - 存储视频数据
+   - 关键字段：`sync_status` (synced/removed), `last_seen_at`, `removed_at`
+   - 唯一约束：`(playlist_id, youtube_video_id)`
 
-3. **user_quotas**
-   - Manages per-user analysis quota.
-   - Fields: `analysis_count`, `max_analyses`.
+3. **video_analyses**
+   - 存储视频分析记录
+   - 用于去重：`(video_id, prompt_hash)`
 
-4. **youtube_accounts**
-   - Stores YouTube OAuth credentials.
-   - YouTube 璐﹀彿璁よ瘉淇℃伅
+4. **user_quotas**
+   - 用户分析配额管理
+   - 字段：`analysis_count`, `max_analyses`
 
-## 绠＄悊鍚庡彴 API
+5. **youtube_accounts**
+   - YouTube 账号认证信息
 
-### 璁よ瘉
-- 浣跨敤 Supabase Auth 杩涜韬唤楠岃瘉
-- 璇锋眰澶达細`Authorization: Bearer <token>`
-- 楠岃瘉娴佺▼锛?
-  1. 浠?Authorization 澶存彁鍙?token
-  2. 浣跨敤 Supabase 楠岃瘉 token 骞惰幏鍙栫敤鎴蜂俊鎭?
-  3. 鏌ヨ `admin_users` 琛ㄧ‘璁ょ敤鎴锋槸鍚︿负绠＄悊鍛?
-  4. 楠岃瘉澶辫触杩斿洖 401锛坢issing_token/invalid_token锛夋垨 403锛坣ot_admin锛?
+## 管理后台 API
 
-### 涓昏鎺ュ彛
+### 认证
+- 使用 Supabase Auth 进行身份验证
+- 请求头：`Authorization: Bearer <token>`
+- 验证流程：
+  1. 从 Authorization 头提取 token
+  2. 使用 Supabase 验证 token 并获取用户信息
+  3. 查询 `admin_users` 表确认用户是否为管理员
+  4. 验证失败返回 401（missing_token/invalid_token）或 403（not_admin）
+
+### 主要接口
 
 1. **POST /admin/analysis**
-   - 绠＄悊鍛樿Е鍙戝垎鏋愪换鍔″叆闃?
-   - 鍙傛暟锛歶serId锛堝彲閫夛級, videoIds锛堝彲閫夛級, limit锛堝彲閫夛級
-   - 杩斿洖锛歟nqueued/skipped/skipReasons
+   - 管理员触发分析任务入队
+   - 参数：playlistId（必填）, userId（可选）, videoIds（可选）, limit（可选）
+   - 返回：enqueued/skipped/skipReasons
 
 2. **GET /admin/videos**
-   - 绠＄悊鍛樻煡璇㈣棰戝垪琛?
-   - 鍙傛暟锛歶serId锛堝彲閫夛級, status锛堝彲閫夛級, limit锛堝彲閫夛級, offset锛堝彲閫夛級
-   - 杩斿洖锛氳棰戝垪琛?+ 鏈€鏂板垎鏋愪俊鎭?
+   - 管理员查询视频列表
+   - 参数：userId（可选）, syncStatus（可选）, limit（可选）, offset（可选）
+   - 返回：视频列表 + 最新分析信息
 
 3. **GET /admin/users**
-   - 鏌ヨ绠＄悊鍛樼敤鎴峰垪琛?
+   - 查询管理员用户列表
 
 4. **POST /admin/users**
-   - 娣诲姞绠＄悊鍛樼敤鎴?
-   - 鍙傛暟锛歟mail, password锛堝彲閫夛級, createIfNotExists锛堝彲閫夛級
+   - 添加管理员用户
+   - 参数：email, password（可选）, createIfNotExists（可选）
 
 5. **DELETE /admin/users/:userId**
-   - 鍒犻櫎绠＄悊鍛樼敤鎴凤紙涓嶈兘鍒犻櫎鑷繁锛?
+   - 删除管理员用户（不能删除自己）
 
 6. **GET /admin/system-users**
-   - 鏌ヨ绯荤粺鎵€鏈夌敤鎴峰強鍏?YouTube 璐﹀彿淇℃伅
+   - 查询系统所有用户及其 YouTube 账号信息
 
-### OpenAPI 鎺ュ彛
-- 閴存潈锛氬叡浜瘑閽ワ紙`OPENAPI_SHARED_KEY`锛夛紝鍙€氳繃 `x-openapi-key` 鎴?`Authorization: Bearer <key>` 浼犻€?
-- acting user锛氱敱璇锋眰浣撲腑鐨?userId 鎸囧畾锛屾湇鍔＄浼氬仛璧勬簮褰掑睘鏍￠獙
+### OpenAPI 接口
+- 鉴权：共享密钥（`OPENAPI_SHARED_KEY`），可通过 `x-openapi-key` 或 `Authorization: Bearer <key>` 传递
+- acting user：由请求体中的 userId 指定，服务端会做资源归属校验
 
 1. **POST /openapi/analysis**
-   - 瑙﹀彂鍒嗘瀽浠诲姟鍏ラ槦
-   - 鍙傛暟锛歶serId锛堝繀濉級, videoIds锛堝彲閫夛級, limit锛堝彲閫夛級
-   - 鏍￠獙锛歷ideo 蹇呴』褰掑睘 userId
-   - 杩斿洖锛歟nqueued/skipped/skipReasons
+   - 触发分析任务入队
+   - 参数：userId（必填）, playlistId（必填）, videoIds（可选）, limit（可选）
+   - 校验：playlist/video 必须归属 userId
+   - 返回：enqueued/skipped/skipReasons
 
-### 闈欐€佹枃浠舵湇鍔?
-- 鎻愪緵 admin 鍓嶇鐨勯潤鎬佹枃浠舵湇鍔?
-- SPA 璺敱鍥為€€锛氶潪 API 璺敱杩斿洖 index.html
+### 静态文件服务
+- 提供 admin 前端的静态文件服务
+- SPA 路由回退：非 API 路由返回 index.html
 
-## 閰嶇疆椤?
+## 配置项
 
-| 鐜鍙橀噺 | 璇存槑 | 榛樿鍊?|
+| 环境变量 | 说明 | 默认值 |
 |---------|------|--------|
-| `PORT` | 鏈嶅姟绔彛 | 4000 |
-| `DATABASE_URL` | PostgreSQL 杩炴帴瀛楃涓?| 蹇呭～ |
-| `SUPABASE_URL` | Supabase 椤圭洰 URL | 蹇呭～ |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 鏈嶅姟瑙掕壊瀵嗛挜 | 蹇呭～ |
-| `ADMIN_ORIGIN` | 绠＄悊鍚庡彴鍏佽鐨勬簮 | http://localhost:5173 |
-| `OPENAPI_SHARED_KEY` | OpenAPI 鍏变韩瀵嗛挜 | 蹇呭～ |
-| `LOG_LEVEL` | 鏃ュ織绾у埆 | info |
-| `SENTRY_DSN` | Sentry DSN锛堝彲閫夛級 | - |
-| `SENTRY_ENV` | Sentry 鐜锛堝彲閫夛級 | - |
-| `GEMINI_API_KEY` | Gemini API Key锛堢敤浜庡垎鏋愶級 | - |
-| `GEMINI_MODEL` | Gemini 妯″瀷鍚嶇О | gemini-1.5-flash |
+| `PORT` | 服务端口 | 4000 |
+| `DATABASE_URL` | PostgreSQL 连接字符串 | 必填 |
+| `SUPABASE_URL` | Supabase 项目 URL | 必填 |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 服务角色密钥 | 必填 |
+| `ADMIN_ORIGIN` | 管理后台允许的源 | http://localhost:5173 |
+| `OPENAPI_SHARED_KEY` | OpenAPI 共享密钥 | 必填 |
+| `LOG_LEVEL` | 日志级别 | info |
+| `SENTRY_DSN` | Sentry DSN（可选） | - |
+| `SENTRY_ENV` | Sentry 环境（可选） | - |
+| `GEMINI_API_KEY` | Gemini API Key（用于分析） | - |
+| `GEMINI_MODEL` | Gemini 模型名称 | gemini-1.5-flash |
 
-## 鍏抽敭甯搁噺
+## 关键常量
 
-- `ANALYSIS_MAX_DURATION_SEC`: 3600锛? 灏忔椂锛? 瑙嗛鍒嗘瀽鐨勬渶澶ф椂闀块檺鍒?
-- `ANALYSIS_PROCESSING_TIMEOUT_MS`: 15 鍒嗛挓 - 澶勭悊瓒呮椂鏃堕棿
+- `ANALYSIS_MAX_DURATION_SEC`: 3600（1 小时）- 视频分析的最大时长限制
+- `ANALYSIS_PROCESSING_TIMEOUT_MS`: 15 分钟 - 处理超时时间
 
-## 閿欒鐩戞帶
+## 错误监控
 
-- 闆嗘垚 Sentry 杩涜閿欒杩借釜
-- 鍏抽敭閿欒鐐癸細
-  - Gemini API 璋冪敤澶辫触
-  - 鏁版嵁搴撴搷浣滃紓甯?
-  - 浠诲姟澶勭悊寮傚父
+- 集成 Sentry 进行错误追踪
+- 关键错误点：
+  - Gemini API 调用失败
+  - 数据库操作异常
+  - 任务处理异常
 
-## 绯荤粺鍚姩娴佺▼
+## 系统启动流程
 
 ```
-1. 鍔犺浇鐜閰嶇疆
-2. 鍒濆鍖?Logger
-3. 鍒濆鍖?Sentry锛堝鏋滈厤缃簡 DSN锛?
-4. 杩炴帴 PostgreSQL锛坧g-boss + 涓氬姟鏁版嵁搴擄級
-5. 杩炴帴 Supabase
-6. 鍚姩 pg-boss
-7. 娉ㄥ唽 Worker锛坅nalyze.video锛?
-8. 鍚姩 HTTP 鏈嶅姟鍣紙Fastify锛?
-9. 鐩戝惉鍏抽棴淇″彿锛圫IGINT/SIGTERM锛?
+1. 加载环境配置
+2. 初始化 Logger
+3. 初始化 Sentry（如果配置了 DSN）
+4. 连接 PostgreSQL（pg-boss + 业务数据库）
+5. 连接 Supabase
+6. 启动 pg-boss
+7. 注册 Worker（analyze.video）
+8. 启动 HTTP 服务器（Fastify）
+9. 监听关闭信号（SIGINT/SIGTERM）
 ```
 
-## 娉ㄦ剰浜嬮」
+## 注意事项
 
-1. **浠诲姟鍘婚噸**锛氫娇鐢?`singletonKey` 闃叉鍚屼竴瑙嗛鐨勯噸澶嶅垎鏋愪换鍔?
-2. **閰嶉绠＄悊**锛氳棰戝垎鏋愪换鍔″彈鐢ㄦ埛閰嶉闄愬埗
-3. **閿欒鎭㈠**锛氬垎鏋愬け璐ヤ細閫€杩橀厤棰?
+1. **任务去重**：使用 `singletonKey` 防止同一视频的重复分析任务
+2. **配额管理**：视频分析任务受用户配额限制
+3. **错误恢复**：分析失败会退还配额

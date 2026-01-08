@@ -21,6 +21,12 @@ ALTER TABLE public.videos
 
 CREATE INDEX IF NOT EXISTS videos_user_id_idx ON public.videos (user_id);
 
+-- videos: drop existing RLS policies that depend on playlist_id
+DROP POLICY IF EXISTS "Users can view their videos" ON public.videos;
+DROP POLICY IF EXISTS "Users can insert their videos" ON public.videos;
+DROP POLICY IF EXISTS "Users can update their videos" ON public.videos;
+DROP POLICY IF EXISTS "Users can delete their videos" ON public.videos;
+
 -- videos: drop playlist_id column entirely
 ALTER TABLE public.videos
   DROP CONSTRAINT IF EXISTS videos_playlist_id_fkey;
@@ -31,6 +37,27 @@ ALTER TABLE public.videos
 -- videos: enforce uniqueness per user
 ALTER TABLE public.videos
   DROP CONSTRAINT IF EXISTS videos_unique_playlist_video;
+
+-- videos: deduplicate before adding unique constraint
+-- Step 1: Update video_analyses to point to the video we'll keep (oldest per user+youtube_video_id)
+UPDATE public.video_analyses va
+SET video_id = kept.id
+FROM public.videos v
+JOIN (
+  SELECT DISTINCT ON (user_id, youtube_video_id) id, user_id, youtube_video_id
+  FROM public.videos
+  ORDER BY user_id, youtube_video_id, created_at ASC
+) kept ON v.user_id = kept.user_id AND v.youtube_video_id = kept.youtube_video_id
+WHERE va.video_id = v.id
+  AND v.id != kept.id;
+
+-- Step 2: Delete duplicate videos (keep the oldest per user+youtube_video_id)
+DELETE FROM public.videos
+WHERE id NOT IN (
+  SELECT DISTINCT ON (user_id, youtube_video_id) id
+  FROM public.videos
+  ORDER BY user_id, youtube_video_id, created_at ASC
+);
 
 ALTER TABLE public.videos
   ADD CONSTRAINT videos_unique_user_video UNIQUE (user_id, youtube_video_id);
@@ -43,10 +70,6 @@ ALTER TABLE public.video_analyses
   DROP COLUMN IF EXISTS playlist_id;
 
 -- RLS: videos (user-owned)
-DROP POLICY IF EXISTS "Users can view their videos" ON public.videos;
-DROP POLICY IF EXISTS "Users can insert their videos" ON public.videos;
-DROP POLICY IF EXISTS "Users can update their videos" ON public.videos;
-DROP POLICY IF EXISTS "Users can delete their videos" ON public.videos;
 
 CREATE POLICY "Users can view their videos"
   ON public.videos FOR SELECT
