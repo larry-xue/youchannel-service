@@ -245,7 +245,6 @@ type AnalyzeVideoPayload = {
   playlistId: string;
   userId: string;
   prompt: string;
-  promptHash: string;
 };
 
 type VideoAnalysisTarget = {
@@ -256,7 +255,7 @@ type VideoAnalysisTarget = {
   title: string | null;
   description: string | null;
   duration: string | null;
-  sync_status: string;
+  status: string;
   raw: Record<string, unknown> | null;
 };
 
@@ -477,7 +476,7 @@ async function fetchVideoForAnalysis(db: DbPool, videoId: string) {
             v.title,
             v.description,
             v.duration,
-            v.sync_status,
+            v.status,
             v.raw
      from videos v
      join playlists p on p.id = v.playlist_id
@@ -488,14 +487,13 @@ async function fetchVideoForAnalysis(db: DbPool, videoId: string) {
   return result.rows[0] ?? null;
 }
 
-async function fetchAnalysisRecord(db: DbPool, videoId: string, promptHash: string) {
+async function fetchAnalysisRecord(db: DbPool, videoId: string) {
   const result = await db.query<AnalysisRecord>(
     `select id, status, updated_at
      from video_analyses
      where video_id = $1
-       and prompt_hash = $2
      limit 1`,
-    [videoId, promptHash]
+    [videoId]
   );
   return result.rows[0] ?? null;
 }
@@ -506,8 +504,6 @@ async function upsertVideoAnalysisIfStatus(
     videoId: string;
     playlistId: string;
     userId: string;
-    prompt: string;
-    promptHash: string;
     status: AnalysisStatus;
     model: string;
     analysisText: string;
@@ -522,34 +518,29 @@ async function upsertVideoAnalysisIfStatus(
        video_id,
        playlist_id,
        user_id,
-       prompt,
-       prompt_hash,
        analysis_text,
        model,
        usage,
        status,
        error,
        skip_reason
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-     on conflict (video_id, prompt_hash)
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     on conflict (video_id)
      do update set
        playlist_id = excluded.playlist_id,
        user_id = excluded.user_id,
-       prompt = excluded.prompt,
        analysis_text = excluded.analysis_text,
        model = excluded.model,
        usage = excluded.usage,
        status = excluded.status,
        error = excluded.error,
        skip_reason = excluded.skip_reason
-     where video_analyses.status = any($12::text[])
+     where video_analyses.status = any($10::text[])
      returning id, status`,
     [
       params.videoId,
       params.playlistId,
       params.userId,
-      params.prompt,
-      params.promptHash,
       params.analysisText,
       params.model,
       params.usage,
@@ -583,12 +574,12 @@ async function updateVideoAnalysis(db: DbPool, params: {
   await db.query(
     `update video_analyses
      set analysis_text = $1,
-         model = $2,
-         usage = $3,
-         status = $4,
-         error = $5,
-         skip_reason = $6,
-         failed_count = ${failedCountExpression}
+     model = $2,
+     usage = $3,
+     status = $4,
+     error = $5,
+     skip_reason = $6,
+     failed_count = ${failedCountExpression}
      where id = $7`,
     [
       params.analysisText,
@@ -666,9 +657,8 @@ export async function registerWorkers(params: {
     const playlistId = payload?.playlistId;
     const userId = payload?.userId;
     const prompt = payload?.prompt;
-    const promptHash = payload?.promptHash;
 
-    if (!videoId || !playlistId || !userId || !prompt || !promptHash) {
+    if (!videoId || !playlistId || !userId || !prompt) {
       logger.error({ jobId: job.id }, "analyze.video missing required payload");
       throw new Error("analyze.video missing required payload");
     }
@@ -695,7 +685,7 @@ export async function registerWorkers(params: {
       return { status: ANALYSIS_STATUS.skipped, reason: "payload_mismatch" };
     }
 
-    const existing = await fetchAnalysisRecord(db, videoId, promptHash);
+    const existing = await fetchAnalysisRecord(db, videoId);
     const processingStale = isProcessingStale(existing);
     const reclaimableStatuses = processingStale
       ? [...ANALYSIS_MUTABLE_STATUSES, ANALYSIS_STATUS.processing]
@@ -715,8 +705,6 @@ export async function registerWorkers(params: {
         videoId,
         playlistId,
         userId,
-        prompt,
-        promptHash,
         status: ANALYSIS_STATUS.skipped,
         model: config.geminiModel,
         analysisText: "Skipped: duration_exceeded",
@@ -726,7 +714,7 @@ export async function registerWorkers(params: {
         allowedStatuses: reclaimableStatuses
       });
       if (!skipped) {
-        const current = await fetchAnalysisRecord(db, videoId, promptHash);
+        const current = await fetchAnalysisRecord(db, videoId);
         logger.info({ videoId, analysisId: current?.id }, "Analyze video skipped; already handled");
         return { status: current?.status ?? ANALYSIS_STATUS.skipped, analysisId: current?.id, reason: "analysis_exists" };
       }
@@ -734,13 +722,11 @@ export async function registerWorkers(params: {
       return { status: ANALYSIS_STATUS.skipped, reason: "duration_exceeded", analysisId: skipped.id };
     }
 
-    if (video.sync_status !== "synced") {
+    if (video.status !== "active") {
       const skipped = await upsertVideoAnalysisIfStatus(db, {
         videoId,
         playlistId,
         userId,
-        prompt,
-        promptHash,
         status: ANALYSIS_STATUS.skipped,
         model: config.geminiModel,
         analysisText: "Skipped: video_unavailable",
@@ -750,11 +736,11 @@ export async function registerWorkers(params: {
         allowedStatuses: reclaimableStatuses
       });
       if (!skipped) {
-        const current = await fetchAnalysisRecord(db, videoId, promptHash);
+        const current = await fetchAnalysisRecord(db, videoId);
         logger.info({ videoId, analysisId: current?.id }, "Analyze video skipped; already handled");
         return { status: current?.status ?? ANALYSIS_STATUS.skipped, analysisId: current?.id, reason: "analysis_exists" };
       }
-      logger.info({ videoId, analysisId: skipped.id, syncStatus: video.sync_status }, "Analyze video skipped; unavailable");
+      logger.info({ videoId, analysisId: skipped.id, status: video.status }, "Analyze video skipped; unavailable");
       return { status: ANALYSIS_STATUS.skipped, reason: "video_unavailable", analysisId: skipped.id };
     }
 
@@ -763,8 +749,6 @@ export async function registerWorkers(params: {
       videoId,
       playlistId,
       userId,
-      prompt,
-      promptHash,
       status: ANALYSIS_STATUS.processing,
       model,
       analysisText: "",
@@ -775,7 +759,7 @@ export async function registerWorkers(params: {
     });
 
     if (!claimed) {
-      const current = await fetchAnalysisRecord(db, videoId, promptHash);
+      const current = await fetchAnalysisRecord(db, videoId);
       if (current) {
         logger.info({ videoId, analysisId: current.id, status: current.status }, "Analyze video skipped; already handled");
         return { status: current.status, analysisId: current.id, reason: "analysis_exists" };

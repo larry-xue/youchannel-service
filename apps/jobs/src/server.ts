@@ -214,14 +214,12 @@ export async function buildServer(params: {
     credentials: true
   });
 
-  // 提供 admin 前端的静态文件服务
-  // 在运行时，工作目录是 /app/apps/jobs
-  // admin/dist 在 /app/apps/admin/dist，所以相对路径是 ../admin/dist
+  // Provide admin frontend static files
   const adminDistPath = join(process.cwd(), "../admin/dist");
-  
+
   await app.register(fastifyStatic, {
     root: adminDistPath,
-    prefix: "/" // 在根路径提供静态文件
+    prefix: "/" // Serve static files at root
   });
 
   const requireAdmin = createAdminGuard(supabase);
@@ -321,7 +319,7 @@ export async function buildServer(params: {
   app.get("/admin/videos", { preHandler: requireAdmin }, async (request, reply) => {
     const query = request.query as Record<string, string | string[] | undefined>;
     const userId = parseOptionalQueryString(query.userId);
-    const syncStatus = parseOptionalQueryString(query.syncStatus);
+    const status = parseOptionalQueryString(query.status);
     const limit = parseLimit(query.limit);
     const offset = parseOffset(query.offset);
 
@@ -335,15 +333,15 @@ export async function buildServer(params: {
       return { error: "invalid_offset" };
     }
 
-    const allowedStatuses = new Set(["synced", "removed", "unavailable"]);
-    if (syncStatus && !allowedStatuses.has(syncStatus)) {
+    const allowedStatuses = new Set(["pending", "active", "error"]);
+    if (status && !allowedStatuses.has(status)) {
       reply.code(400);
-      return { error: "invalid_sync_status" };
+      return { error: "invalid_status" };
     }
 
     const rows = await listAdminVideos(db, {
       userId,
-      syncStatus,
+      status,
       limit: limit ?? 50,
       offset: offset ?? 0
     });
@@ -630,14 +628,12 @@ export async function buildServer(params: {
     return { rows, total };
   });
 
-  // SPA 回退路由：所有非 API 路由都返回 index.html
+  // SPA fallback
   app.setNotFoundHandler(async (request, reply) => {
-    // 如果是 API 路由（以 /admin/ 或 /health 开头），返回 404
     if (request.url.startsWith("/admin/") || request.url.startsWith("/openapi/") || request.url.startsWith("/health")) {
       reply.code(404);
       return { error: "not_found" };
     }
-    // 否则返回前端 index.html（用于 SPA 路由）
     try {
       const indexPath = join(adminDistPath, "index.html");
       const indexContent = readFileSync(indexPath, "utf-8");

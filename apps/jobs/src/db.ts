@@ -17,16 +17,13 @@ export type AdminVideoRow = {
   youtube_video_id: string;
   title: string | null;
   duration: string | null;
-  sync_status: string;
-  last_seen_at: string | null;
+  status: string;
   removed_at: string | null;
   created_at: string;
   analysis_count: number;
   analysis_id: string | null;
   analysis_status: string | null;
   analysis_model: string | null;
-  analysis_prompt: string | null;
-  analysis_prompt_hash: string | null;
   analysis_text: string | null;
   analysis_error: string | null;
   analysis_created_at: string | null;
@@ -53,7 +50,7 @@ export async function listAdminVideos(
   params: {
     userId?: string;
     playlistId?: string;
-    syncStatus?: string;
+    status?: string;
     analysisStatus?: string;
     youtubeVideoId?: string;
     title?: string;
@@ -74,9 +71,10 @@ export async function listAdminVideos(
     conditions.push(`v.playlist_id = $${values.length}`);
   }
 
-  if (params.syncStatus) {
-    values.push(params.syncStatus);
-    conditions.push(`v.sync_status = $${values.length}`);
+  // Renamed from syncStatus to status
+  if (params.status) {
+    values.push(params.status);
+    conditions.push(`v.status = $${values.length}`);
   }
 
   if (params.analysisStatus) {
@@ -115,16 +113,13 @@ export async function listAdminVideos(
             v.youtube_video_id,
             v.title,
             v.duration,
-            v.sync_status,
-            v.last_seen_at,
+            v.status,
             v.removed_at,
             v.created_at,
             coalesce(ac.analysis_count, 0) as analysis_count,
             la.id as analysis_id,
             la.status as analysis_status,
             la.model as analysis_model,
-            la.prompt as analysis_prompt,
-            la.prompt_hash as analysis_prompt_hash,
             la.analysis_text as analysis_text,
             la.error as analysis_error,
             la.created_at as analysis_created_at,
@@ -138,14 +133,12 @@ export async function listAdminVideos(
      ) ac on true
      left join lateral (
        select id,
-              status,
-              model,
-              prompt,
-              prompt_hash,
-              analysis_text,
-              error,
-              created_at,
-              updated_at
+       status,
+       model,
+       analysis_text,
+       error,
+       created_at,
+       updated_at
        from video_analyses
        where video_id = v.id
        order by created_at desc

@@ -36,11 +36,11 @@ import {
 } from "./ui/pagination";
 import { ChevronDown, ChevronUp, Eye, Loader2, RefreshCw, Sparkles } from "lucide-react";
 
-const SYNC_STATUS_OPTIONS = [
-  { value: "all", label: "All sync statuses" },
-  { value: "synced", label: "Synced" },
-  { value: "removed", label: "Removed" },
-  { value: "unavailable", label: "Unavailable" }
+const STATUS_OPTIONS = [
+  { value: "all", label: "All statuses" },
+  { value: "pending", label: "Pending" },
+  { value: "active", label: "Active" },
+  { value: "error", label: "Error" }
 ];
 
 const ANALYSIS_STATUS_OPTIONS = [
@@ -72,10 +72,10 @@ function shortId(value: string | null | undefined, length = 8) {
   return `${value.slice(0, length)}...`;
 }
 
-function getSyncBadgeVariant(status: string) {
-  if (status === "synced") return "secondary";
-  if (status === "removed") return "outline";
-  if (status === "unavailable") return "destructive";
+function getStatusBadgeVariant(status: string) {
+  if (status === "active") return "secondary";
+  if (status === "pending") return "outline";
+  if (status === "error") return "destructive";
   return "outline";
 }
 
@@ -151,7 +151,7 @@ export function Videos() {
   const [formPlaylistId, setFormPlaylistId] = useState("");
   const [formYoutubeVideoId, setFormYoutubeVideoId] = useState("");
   const [formTitle, setFormTitle] = useState("");
-  const [formSyncStatus, setFormSyncStatus] = useState("all");
+  const [formStatus, setFormStatus] = useState("all");
   const [formAnalysisStatus, setFormAnalysisStatus] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
 
@@ -204,7 +204,7 @@ export function Videos() {
       playlistId: formPlaylistId.trim() || undefined,
       youtubeVideoId: formYoutubeVideoId.trim() || undefined,
       title: formTitle.trim() || undefined,
-      syncStatus: formSyncStatus === "all" ? undefined : formSyncStatus,
+      status: formStatus === "all" ? undefined : formStatus,
       analysisStatus: formAnalysisStatus === "all" ? undefined : formAnalysisStatus
     });
     setPage(1);
@@ -215,7 +215,7 @@ export function Videos() {
     setFormPlaylistId("");
     setFormYoutubeVideoId("");
     setFormTitle("");
-    setFormSyncStatus("all");
+    setFormStatus("all");
     setFormAnalysisStatus("all");
     setFilters({});
     setPage(1);
@@ -339,13 +339,13 @@ export function Videos() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="filter-sync-status">Sync Status</Label>
-                  <Select value={formSyncStatus} onValueChange={setFormSyncStatus}>
-                    <SelectTrigger id="filter-sync-status">
+                  <Label htmlFor="filter-status">Status</Label>
+                  <Select value={formStatus} onValueChange={setFormStatus}>
+                    <SelectTrigger id="filter-status">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {SYNC_STATUS_OPTIONS.map((option) => (
+                      {STATUS_OPTIONS.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -412,7 +412,7 @@ export function Videos() {
                       IDs
                     </TableHead>
                     <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Sync
+                      Status
                     </TableHead>
                     <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
                       Analysis
@@ -433,7 +433,7 @@ export function Videos() {
                     rows.map((row) => {
                       const analysisStatus = row.analysis_status ?? "";
                       const isLocked = analysisStatus === "queued" || analysisStatus === "processing";
-                      const canAnalyze = row.sync_status === "synced" && !isLocked;
+                      const canAnalyze = row.status === "active" && !isLocked;
                       const isPending = analyzeMutation.isPending && analyzeMutation.variables?.id === row.id;
 
                       return (
@@ -473,10 +473,10 @@ export function Videos() {
                             </div>
                           </TableCell>
 
-                          {/* Sync Status */}
+                          {/* Status */}
                           <TableCell className="align-top">
-                            <Badge variant={getSyncBadgeVariant(row.sync_status)} className="capitalize">
-                              {row.sync_status}
+                            <Badge variant={getStatusBadgeVariant(row.status)} className="capitalize">
+                              {row.status}
                             </Badge>
                             {row.removed_at && (
                               <div className="mt-1 text-xs text-muted-foreground">
@@ -504,7 +504,6 @@ export function Videos() {
                           <TableCell className="align-top">
                             <div className="space-y-1 text-xs text-muted-foreground">
                               <div>Created: {formatTime(row.created_at)}</div>
-                              <div>Last seen: {formatTime(row.last_seen_at)}</div>
                               {row.analysis_created_at && (
                                 <div>Analysis: {formatTime(row.analysis_created_at)}</div>
                               )}
@@ -546,22 +545,6 @@ export function Videos() {
                                   Error
                                 </Button>
                               )}
-                              {row.analysis_prompt && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2"
-                                  onClick={() =>
-                                    setDetailDialog({
-                                      title: "Analysis Prompt",
-                                      content: row.analysis_prompt ?? ""
-                                    })
-                                  }
-                                >
-                                  <Eye className="mr-1 h-3 w-3" />
-                                  Prompt
-                                </Button>
-                              )}
                             </div>
                           </TableCell>
 
@@ -594,7 +577,7 @@ export function Videos() {
                                   ? "Queue analysis"
                                   : isLocked
                                     ? "Analysis is already queued or processing"
-                                    : "Only synced videos can be analyzed"}
+                                    : "Only active videos can be analyzed"}
                               </TooltipContent>
                             </Tooltip>
                           </TableCell>

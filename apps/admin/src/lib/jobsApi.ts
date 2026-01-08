@@ -92,16 +92,13 @@ export type AdminVideoRow = {
   youtube_video_id: string;
   title: string | null;
   duration: string | null;
-  sync_status: string;
-  last_seen_at: string | null;
+  status: string;
   removed_at: string | null;
   created_at: string;
   analysis_count: number;
   analysis_id: string | null;
   analysis_status: string | null;
   analysis_model: string | null;
-  analysis_prompt: string | null;
-  analysis_prompt_hash: string | null;
   analysis_text: string | null;
   analysis_error: string | null;
   analysis_created_at: string | null;
@@ -113,7 +110,7 @@ export type AdminVideosParams = {
   playlistId?: string;
   youtubeVideoId?: string;
   title?: string;
-  syncStatus?: string;
+  status?: string;
   analysisStatus?: string;
   limit?: number;
   offset?: number;
@@ -121,11 +118,11 @@ export type AdminVideosParams = {
 
 export function fetchAdminVideos(
   token: string,
-  params?: { userId?: string; syncStatus?: string; limit?: number; offset?: number }
+  params?: { userId?: string; status?: string; limit?: number; offset?: number }
 ) {
   const searchParams = new URLSearchParams();
   if (params?.userId) searchParams.set("userId", params.userId);
-  if (params?.syncStatus) searchParams.set("syncStatus", params.syncStatus);
+  if (params?.status) searchParams.set("status", params.status);
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.offset) searchParams.set("offset", String(params.offset));
   const suffix = searchParams.toString();

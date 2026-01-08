@@ -50,7 +50,8 @@ export async function fetchAnalysisCandidates(
   }
 
   const values: Array<string | number | string[]> = [params.playlistId];
-  const conditions: string[] = ["playlist_id = $1", "sync_status = 'synced'"];
+  // Filter by status = 'active' instead of sync_status = 'synced'
+  const conditions: string[] = ["playlist_id = $1", "status = 'active'"];
 
   if (params.videoIds && params.videoIds.length > 0) {
     values.push(params.videoIds);
@@ -110,16 +111,15 @@ export async function enqueueAnalyses(params: {
     return { enqueued: 0, skipped: params.candidates.length, skipReasons };
   }
 
-  const promptHash = createHash("sha256").update(params.prompt).digest("hex");
+  // prompt_hash is removed
   const candidateIds = withinDuration.map((candidate) => candidate.videoId);
   const existingStatuses = new Map<string, string>();
   if (candidateIds.length > 0) {
     const existing = await params.db.query<AnalysisStatusRow>(
       `select video_id, status
        from video_analyses
-       where video_id = any($1::uuid[])
-         and prompt_hash = $2`,
-      [candidateIds, promptHash]
+       where video_id = any($1::uuid[])`,
+      [candidateIds]
     );
     for (const row of existing.rows) {
       existingStatuses.set(row.video_id, row.status);
@@ -175,20 +175,17 @@ export async function enqueueAnalyses(params: {
          video_id,
          playlist_id,
          user_id,
-         prompt,
-         prompt_hash,
          analysis_text,
          model,
          usage,
          status,
          error,
          skip_reason
-       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       on conflict (video_id, prompt_hash)
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       on conflict (video_id)
        do update set
          playlist_id = excluded.playlist_id,
          user_id = excluded.user_id,
-         prompt = excluded.prompt,
          status = excluded.status,
          error = null,
          skip_reason = null
@@ -199,8 +196,6 @@ export async function enqueueAnalyses(params: {
         candidate.videoId,
         params.playlistId,
         params.userId,
-        params.prompt,
-        promptHash,
         "",
         params.model,
         null,
@@ -226,10 +221,9 @@ export async function enqueueAnalyses(params: {
         videoId: candidate.videoId,
         playlistId: params.playlistId,
         userId: params.userId,
-        prompt: params.prompt,
-        promptHash
+        prompt: params.prompt
       },
-      { singletonKey: `analysis.${candidate.videoId}.${promptHash}` }
+      { singletonKey: `analysis.${candidate.videoId}` }
     );
 
     if (bossJobId) {
