@@ -4,12 +4,13 @@ import { supabase } from "../lib/supabase";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
-import { Film, LogOut, Shield, Users } from "lucide-react";
+import { Film, LogOut, Shield, Users, Coins } from "lucide-react";
 import { AdminUsers } from "./AdminUsers";
 import { SystemUsers } from "./SystemUsers";
 import { Videos } from "./Videos";
+import { QuotaManagement } from "./QuotaManagement";
 
-type Tab = "system-users" | "admin-users" | "videos";
+type Tab = "system-users" | "admin-users" | "videos" | "quotas";
 
 export function Dashboard() {
   const { session } = useAuth();
@@ -21,7 +22,9 @@ export function Dashboard() {
         ? "admin-users"
         : pathname.startsWith("/videos")
           ? "videos"
-          : "system-users";
+          : pathname.startsWith("/quotas")
+            ? "quotas"
+            : "system-users";
 
   const tabCopy: Record<Tab, { eyebrow: string; title: string; description: string }> = {
     "system-users": {
@@ -38,6 +41,11 @@ export function Dashboard() {
       eyebrow: "Library",
       title: "Video Management",
       description: "Filter synced videos and trigger Gemini analysis on demand."
+    },
+    quotas: {
+      eyebrow: "配额管理",
+      title: "Quota Management",
+      description: "查看和管理用户配额，添加授权，发起退款。"
     }
   };
   const activeCopy = tabCopy[activeTab];
@@ -92,6 +100,17 @@ export function Dashboard() {
                   Videos
                 </Link>
               </Button>
+              <Button
+                asChild
+                variant={activeTab === "quotas" ? "secondary" : "ghost"}
+                size="sm"
+                className="w-full justify-start"
+              >
+                <Link to="/quotas" search={{ userId: undefined }}>
+                  <Coins className="h-4 w-4" />
+                  Quotas
+                </Link>
+              </Button>
             </nav>
           </div>
 
@@ -134,6 +153,8 @@ export function Dashboard() {
             <AdminUsers />
           ) : activeTab === "videos" ? (
             <Videos />
+          ) : activeTab === "quotas" ? (
+            <QuotaManagement />
           ) : (
             <SystemUsers />
           )}

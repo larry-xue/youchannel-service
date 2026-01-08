@@ -115,6 +115,19 @@ try {
   process.exit(1);
 }
 
+// Handle pg-boss errors to prevent unhandled error crashes
+boss.on("error", (error) => {
+  logger.error({ err: error }, "pg-boss error occurred");
+  // If the error indicates schema is missing, it's likely the database was reset
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message: string }).message;
+    if (message.includes("pgboss") && message.includes("does not exist")) {
+      logger.error("pg-boss schema appears to be missing. Database may have been reset. Exiting for restart...");
+      process.exit(1);
+    }
+  }
+});
+
 async function start() {
   logger.info("Starting pg-boss...");
   try {

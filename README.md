@@ -14,3 +14,4 @@ Quick start:
 Database:
 - Migrations are in `supabase/migrations/`. Apply them to your Supabase project.
 - RLS keeps `sync_runs` and `job_runs` service-role only; admin UI uses the jobs API.
+- Quota system uses `quota_grants` + `quota_usage_events` with RPCs (`consume_quota`, `refund_quota`) and cache refresh helpers; see `docs/QUOTA_DESIGN.md` and `docs/QUOTA_ADMIN.md`.

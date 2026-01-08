@@ -190,3 +190,114 @@ export function fetchSystemUsers(token: string, params?: SystemUsersParams) {
   const path = suffix ? `/admin/system-users?${suffix}` : "/admin/system-users";
   return request<{ rows: SystemUserRow[]; total: number }>(path, token);
 }
+
+// Quota admin types
+export type QuotaGrant = {
+  id: string;
+  user_id: string;
+  source_type: string;
+  source_ref: string | null;
+  video_seconds_total: number;
+  video_seconds_remaining: number;
+  chat_seconds_total: number;
+  chat_seconds_remaining: number;
+  max_video_seconds: number;
+  valid_from: string;
+  valid_to: string | null;
+  consume_priority: number;
+  status: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type QuotaUsageEvent = {
+  id: string;
+  user_id: string;
+  event_type: string;
+  reason: string | null;
+  reference_type: string | null;
+  reference_id: string | null;
+  video_seconds_delta: number;
+  chat_seconds_delta: number;
+  video_duration_seconds: number | null;
+  context: Record<string, unknown> | null;
+  idempotency_key: string;
+  created_at: string;
+};
+
+export type QuotaCache = {
+  user_id: string;
+  video_seconds_total: number;
+  video_seconds_remaining: number;
+  chat_seconds_total: number;
+  chat_seconds_remaining: number;
+  max_video_seconds: number;
+  period_start_at: string;
+  period_end_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type UserQuotaDetails = {
+  user: { id: string; email: string | null } | null;
+  quotaCache: QuotaCache | null;
+  grants: QuotaGrant[];
+  events: QuotaUsageEvent[];
+};
+
+export type AddGrantParams = {
+  userId: string;
+  videoSecondsTotal: number;
+  chatSecondsTotal: number;
+  maxVideoSeconds: number;
+  sourceType?: string;
+  sourceRef?: string;
+  validTo?: string;
+  consumePriority?: number;
+};
+
+export type RefundParams = {
+  userId: string;
+  originalEventId: string;
+  reason?: string;
+};
+
+// Quota admin API functions
+export function fetchUserQuota(token: string, userId: string) {
+  return request<UserQuotaDetails>(`/admin/quota/${userId}`, token);
+}
+
+export function addQuotaGrant(token: string, params: AddGrantParams) {
+  return request<{ success: boolean; grant?: QuotaGrant; error?: string }>(
+    "/admin/quota/grants",
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify(params)
+    }
+  );
+}
+
+export function refundQuota(token: string, params: RefundParams) {
+  return request<{ success: boolean; refundEventId?: string; error?: string }>(
+    "/admin/quota/refund",
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify(params)
+    }
+  );
+}
+
+export function refreshQuotaCache(token: string, userId: string) {
+  return request<{ success: boolean; error?: string }>(
+    "/admin/quota/refresh",
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ userId })
+    }
+  );
+}
+

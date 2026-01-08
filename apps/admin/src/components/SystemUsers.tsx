@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { useAuth } from "../lib/auth";
 import { fetchSystemUsers, type SystemUserRow, type SystemUsersParams, type YoutubeAccountSummary } from "../lib/jobsApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -34,7 +35,7 @@ import {
   PaginationPrevious,
   PaginationEllipsis,
 } from "./ui/pagination";
-import { ChevronDown, ChevronUp, Eye, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye, RefreshCw, Coins } from "lucide-react";
 
 const PAGE_SIZE_OPTIONS = [
   { value: "10", label: "10 / page" },
@@ -352,6 +353,9 @@ export function SystemUsers() {
                     <TableHead className="min-w-[240px] text-xs uppercase tracking-wide text-muted-foreground">
                       YouTube Accounts
                     </TableHead>
+                    <TableHead className="min-w-[80px] text-xs uppercase tracking-wide text-muted-foreground">
+                      Actions
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -455,13 +459,12 @@ export function SystemUsers() {
                                   </div>
                                   <div className="w-full bg-muted rounded-full h-2">
                                     <div
-                                      className={`h-2 rounded-full transition-all ${
-                                        videoPercent >= 100
+                                      className={`h-2 rounded-full transition-all ${videoPercent >= 100
                                           ? "bg-destructive"
                                           : videoPercent >= 80
                                             ? "bg-yellow-500"
                                             : "bg-primary"
-                                      }`}
+                                        }`}
                                       style={{ width: `${videoPercent}%` }}
                                     />
                                   </div>
@@ -492,11 +495,20 @@ export function SystemUsers() {
                         <TableCell className="align-top">
                           <AccountsCell accounts={row.youtube_accounts} />
                         </TableCell>
+
+                        {/* Actions */}
+                        <TableCell className="align-top">
+                          <Button asChild variant="ghost" size="sm">
+                            <Link to="/quotas" search={{ userId: row.id }}>
+                              <Coins className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                      <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                         No users found
                       </TableCell>
                     </TableRow>

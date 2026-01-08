@@ -115,7 +115,8 @@ Eligibility for a video consumption:
 - status = 'active'
 - valid_from <= now and (valid_to is null or valid_to >= now)
 - video_seconds_remaining > 0
-- max_video_seconds >= video_duration_seconds
+- max_video_seconds > 0
+- if video_duration_seconds is provided, it must be <= max_video_seconds
 
 ### quota_usage_events (ledger header)
 Represents a single business action. Delta is applied to remaining.
@@ -165,6 +166,7 @@ CREATE TABLE public.quota_usage_splits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   event_id uuid NOT NULL REFERENCES public.quota_usage_events (id) ON DELETE CASCADE,
   grant_id uuid NOT NULL REFERENCES public.quota_grants (id) ON DELETE RESTRICT,
+  user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
 
   video_seconds_delta bigint NOT NULL DEFAULT 0,
   chat_seconds_delta bigint NOT NULL DEFAULT 0,
@@ -182,6 +184,10 @@ CREATE TABLE public.quota_usage_splits (
 CREATE UNIQUE INDEX IF NOT EXISTS quota_usage_events_idem_idx
   ON public.quota_usage_events (user_id, idempotency_key);
 
+CREATE UNIQUE INDEX IF NOT EXISTS quota_usage_events_refund_idx
+  ON public.quota_usage_events (user_id, (context->>'original_event_id'))
+  WHERE event_type = 'refund';
+
 CREATE INDEX IF NOT EXISTS quota_usage_events_user_created_idx
   ON public.quota_usage_events (user_id, created_at DESC);
 
@@ -198,6 +204,9 @@ CREATE INDEX IF NOT EXISTS quota_usage_splits_event_idx
 
 CREATE INDEX IF NOT EXISTS quota_usage_splits_grant_idx
   ON public.quota_usage_splits (grant_id);
+
+CREATE INDEX IF NOT EXISTS quota_usage_splits_user_idx
+  ON public.quota_usage_splits (user_id);
 ```
 
 ## Concurrency and idempotency
@@ -234,6 +243,8 @@ user_quotas is a cache. Rebuild from grants periodically or on-demand:
 - total = sum(active grants total within validity window)
 - remaining = sum(active grants remaining within validity window)
 - max_video_seconds = max(active grants max_video_seconds within validity window)
+- period_start_at = MIN(valid_from) across active grants (fallback to now() when none)
+- period_end_at = NULL if any active grant is open-ended, else MAX(valid_to)
 
 The cache can be refreshed asynchronously; do not rely on it for enforcing limits.
 
@@ -262,10 +273,17 @@ CREATE POLICY "Users can view own quota events"
   ON public.quota_usage_events FOR SELECT USING (auth.uid() = user_id);
 
 CREATE POLICY "Users can view own quota splits"
-  ON public.quota_usage_splits FOR SELECT USING (
-    auth.uid() = (SELECT user_id FROM public.quota_usage_events e WHERE e.id = event_id)
-  );
+  ON public.quota_usage_splits FOR SELECT USING (auth.uid() = user_id);
 ```
+
+## Implementation notes
+- quota_usage_splits includes user_id for RLS performance; keep it aligned with quota_usage_events.user_id.
+- consume_quota rejects negative inputs and requires at least one non-zero delta.
+- max_video_seconds = 0 means a grant is not usable for video; if video_duration_seconds is provided it must be <= max_video_seconds.
+- refund_quota refunds to the exact same grants via splits and uses a unique index on (user_id, context->>'original_event_id') to prevent double refunds.
+- Cache refresh helpers exist: refresh_user_quota, refresh_all_user_quotas, get_user_quota_summary (see supabase/migrations/20260110100003_add_quota_cache_refresh.sql).
+- Verification scripts live in supabase/tests/verify_quota_rpc.sql and supabase/tests/verify_quota_cache_refresh.sql.
+- Legacy user_quotas (analysis_count/max_analyses) is dropped in supabase/migrations/20260110090000_drop_legacy_user_quotas.sql.
 
 ## Open questions
 - Do we want to enforce a non-null video_duration_seconds when reason = 'video_analysis'?

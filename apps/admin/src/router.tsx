@@ -50,8 +50,17 @@ const videosRoute = createRoute({
   component: Dashboard
 });
 
+const quotasRoute = createRoute({
+  getParentRoute: () => authRoute,
+  path: "quotas",
+  component: Dashboard,
+  validateSearch: (search: Record<string, unknown>) => ({
+    userId: typeof search.userId === "string" ? search.userId : undefined
+  })
+});
+
 const routeTree = rootRoute.addChildren([
-  authRoute.addChildren([dashboardRoute, systemUsersRoute, adminUsersRoute, videosRoute])
+  authRoute.addChildren([dashboardRoute, systemUsersRoute, adminUsersRoute, videosRoute, quotasRoute])
 ]);
 
 export const router = createRouter({
