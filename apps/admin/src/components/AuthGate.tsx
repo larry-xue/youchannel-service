@@ -21,7 +21,7 @@ export function AuthGate() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Checking session...</span>
+              <span>正在检查会话...</span>
             </div>
           </CardContent>
         </Card>
@@ -44,7 +44,7 @@ export function AuthGate() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Validating admin access...</span>
+              <span>正在验证管理员访问权限...</span>
             </div>
           </CardContent>
         </Card>
@@ -57,9 +57,9 @@ export function AuthGate() {
       <div className={centeredClassName}>
         <Card className={cardClassName}>
           <CardHeader>
-            <CardTitle>Admin check failed</CardTitle>
+            <CardTitle>管理员验证失败</CardTitle>
             <CardDescription>
-              Unable to validate admin access. Please retry.
+              无法验证管理员访问权限。请重试。
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -69,7 +69,7 @@ export function AuthGate() {
               </AlertDescription>
             </Alert>
             <Button variant="outline" onClick={() => adminAccess.refetch()} className="w-full">
-              Retry
+              重试
             </Button>
           </CardContent>
         </Card>
@@ -82,14 +82,14 @@ export function AuthGate() {
       <div className={centeredClassName}>
         <Card className={cardClassName}>
           <CardHeader>
-            <CardTitle>Access blocked</CardTitle>
+            <CardTitle>访问被阻止</CardTitle>
             <CardDescription>
-              Your account is not on the admin whitelist.
+              您的账户不在管理员白名单中。
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Button variant="outline" onClick={() => supabase.auth.signOut()} className="w-full">
-              Sign out
+              退出登录
             </Button>
           </CardContent>
         </Card>

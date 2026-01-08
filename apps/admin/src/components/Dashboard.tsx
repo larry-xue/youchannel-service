@@ -28,23 +28,23 @@ export function Dashboard() {
 
   const tabCopy: Record<Tab, { eyebrow: string; title: string; description: string }> = {
     "system-users": {
-      eyebrow: "Users",
-      title: "User Management",
-      description: "Review every account and the connected YouTube credentials."
+      eyebrow: "用户",
+      title: "用户管理",
+      description: "查看所有账户及其关联的 YouTube 凭证。"
     },
     "admin-users": {
-      eyebrow: "Administration",
-      title: "Admin Access",
-      description: "Manage admin accounts, add operators, and secure access."
+      eyebrow: "管理",
+      title: "管理员访问",
+      description: "管理管理员账户，添加操作员，并保护访问权限。"
     },
     videos: {
-      eyebrow: "Library",
-      title: "Video Management",
-      description: "Filter synced videos and trigger Gemini analysis on demand."
+      eyebrow: "视频库",
+      title: "视频管理",
+      description: "筛选已同步的视频并按需触发 Gemini 分析。"
     },
     quotas: {
       eyebrow: "配额管理",
-      title: "Quota Management",
+      title: "配额管理",
       description: "查看和管理用户配额，添加授权，发起退款。"
     }
   };
@@ -63,7 +63,7 @@ export function Dashboard() {
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                   YouChannel
                 </p>
-                <p className="text-lg font-semibold">Admin Console</p>
+                <p className="text-lg font-semibold">管理控制台</p>
               </div>
             </div>
             <nav className="mt-6 space-y-1">
@@ -75,7 +75,7 @@ export function Dashboard() {
               >
                 <Link to="/users">
                   <Users className="h-4 w-4" />
-                  Users
+                  用户
                 </Link>
               </Button>
               <Button
@@ -86,7 +86,7 @@ export function Dashboard() {
               >
                 <Link to="/admins">
                   <Shield className="h-4 w-4" />
-                  Admin Users
+                  管理员用户
                 </Link>
               </Button>
               <Button
@@ -97,7 +97,7 @@ export function Dashboard() {
               >
                 <Link to="/videos">
                   <Film className="h-4 w-4" />
-                  Videos
+                  视频
                 </Link>
               </Button>
               <Button
@@ -108,7 +108,7 @@ export function Dashboard() {
               >
                 <Link to="/quotas" search={{ userId: undefined }}>
                   <Coins className="h-4 w-4" />
-                  Quotas
+                  配额
                 </Link>
               </Button>
             </nav>
@@ -116,19 +116,19 @@ export function Dashboard() {
 
           <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Signed in</CardTitle>
+              <CardTitle className="text-base">已登录</CardTitle>
               <CardDescription className="truncate">
-                {session?.user.email ?? "Admin user"}
+                {session?.user.email ?? "管理员用户"}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                <span>Role</span>
-                <Badge variant="secondary">Administrator</Badge>
+                <span>角色</span>
+                <Badge variant="secondary">管理员</Badge>
               </div>
               <Button variant="outline" onClick={() => supabase.auth.signOut()} className="w-full">
                 <LogOut className="h-4 w-4" />
-                Sign out
+                退出登录
               </Button>
             </CardContent>
           </Card>

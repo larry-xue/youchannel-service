@@ -789,7 +789,7 @@ export async function buildServer(params: {
       return { error: "missing_user_id" };
     }
 
-    const { data, error } = await supabase.rpc("refresh_user_quota_cache", {
+    const { data, error } = await supabase.rpc("refresh_user_quota", {
       p_user_id: userId
     });
 

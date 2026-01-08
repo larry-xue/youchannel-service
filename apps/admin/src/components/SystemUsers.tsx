@@ -38,10 +38,10 @@ import {
 import { ChevronDown, ChevronUp, Eye, RefreshCw, Coins } from "lucide-react";
 
 const PAGE_SIZE_OPTIONS = [
-  { value: "10", label: "10 / page" },
-  { value: "20", label: "20 / page" },
-  { value: "50", label: "50 / page" },
-  { value: "100", label: "100 / page" }
+  { value: "10", label: "每页 10 条" },
+  { value: "20", label: "每页 20 条" },
+  { value: "50", label: "每页 50 条" },
+  { value: "100", label: "每页 100 条" }
 ];
 
 function formatTime(value: string | null | undefined) {
@@ -86,7 +86,7 @@ function CopyableId({ id, label }: { id: string | null | undefined; label?: stri
       <TooltipContent>
         {label ? `${label}: ` : ""}{id}
         <br />
-        <span className="text-xs opacity-70">Click to copy</span>
+        <span className="text-xs opacity-70">点击复制</span>
       </TooltipContent>
     </Tooltip>
   );
@@ -94,7 +94,7 @@ function CopyableId({ id, label }: { id: string | null | undefined; label?: stri
 
 function AccountsCell({ accounts }: { accounts: YoutubeAccountSummary[] }) {
   if (!accounts.length) {
-    return <span className="text-sm text-muted-foreground">No linked accounts</span>;
+    return <span className="text-sm text-muted-foreground">无关联账户</span>;
   }
 
   return (
@@ -113,15 +113,15 @@ function AccountsCell({ accounts }: { accounts: YoutubeAccountSummary[] }) {
             </Badge>
           </div>
           <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-            <span>Created: {formatTime(account.created_at)}</span>
-            <span>Updated: {formatTime(account.updated_at)}</span>
-            <span>Expires: {formatTime(account.expires_at)}</span>
-            <span>Type: {account.token_type ?? "-"}</span>
-            <span>Access: {account.has_access_token ? "yes" : "no"}</span>
-            <span>Refresh: {account.has_refresh_token ? "yes" : "no"}</span>
+            <span>创建: {formatTime(account.created_at)}</span>
+            <span>更新: {formatTime(account.updated_at)}</span>
+            <span>过期: {formatTime(account.expires_at)}</span>
+            <span>类型: {account.token_type ?? "-"}</span>
+            <span>访问令牌: {account.has_access_token ? "是" : "否"}</span>
+            <span>刷新令牌: {account.has_refresh_token ? "是" : "否"}</span>
           </div>
           <div className="mt-2 text-[11px] text-muted-foreground wrap-break-word">
-            Scope: {account.scope ?? "-"}
+            范围: {account.scope ?? "-"}
           </div>
         </div>
       ))}
@@ -145,13 +145,13 @@ function MetadataCell({ data, title }: { data: Record<string, unknown> | null; t
         onClick={() => setDialogOpen(true)}
       >
         <Eye className="mr-1 h-3 w-3" />
-        View
+        查看
       </Button>
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[80vh] max-w-2xl overflow-hidden">
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>JSON metadata</DialogDescription>
+            <DialogDescription>JSON 元数据</DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-auto">
             <pre className="whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/50 p-4 text-sm">
@@ -250,12 +250,12 @@ export function SystemUsers() {
     <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
       <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <CardTitle>System Users</CardTitle>
-          <CardDescription>All users and their linked YouTube accounts.</CardDescription>
+          <CardTitle>系统用户</CardTitle>
+          <CardDescription>所有用户及其关联的 YouTube 账户。</CardDescription>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="secondary">{total} users</Badge>
-          <Badge variant="outline">{accountCount} accounts (this page)</Badge>
+          <Badge variant="secondary">{total} 个用户</Badge>
+          <Badge variant="outline">{accountCount} 个账户（本页）</Badge>
           <Button
             variant="outline"
             size="sm"
@@ -263,7 +263,7 @@ export function SystemUsers() {
             disabled={usersQuery.isFetching}
           >
             <RefreshCw className={usersQuery.isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-            Refresh
+            刷新
           </Button>
         </div>
       </CardHeader>
@@ -278,7 +278,7 @@ export function SystemUsers() {
             className="mb-4"
           >
             {showFilters ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            Filters
+            筛选
             {activeFilterCount > 0 && (
               <Badge variant="secondary" className="ml-2">
                 {activeFilterCount}
@@ -290,10 +290,10 @@ export function SystemUsers() {
             <form onSubmit={handleApply} className="rounded-lg border border-border/70 bg-muted/20 p-4">
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="space-y-2">
-                  <Label htmlFor="filter-email">Email (contains)</Label>
+                  <Label htmlFor="filter-email">邮箱（包含）</Label>
                   <Input
                     id="filter-email"
-                    placeholder="Search by email"
+                    placeholder="按邮箱搜索"
                     value={formEmail}
                     onChange={(e) => setFormEmail(e.target.value)}
                   />
@@ -301,10 +301,10 @@ export function SystemUsers() {
               </div>
               <div className="mt-4 flex items-center gap-2">
                 <Button type="submit" size="sm">
-                  Apply Filters
+                  应用筛选
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={handleReset}>
-                  Reset
+                  重置
                 </Button>
               </div>
             </form>
@@ -320,7 +320,7 @@ export function SystemUsers() {
         ) : usersQuery.error ? (
           <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
             <AlertDescription>
-              Failed to load users: {String(usersQuery.error)}
+              加载用户失败: {String(usersQuery.error)}
             </AlertDescription>
           </Alert>
         ) : (
@@ -330,31 +330,31 @@ export function SystemUsers() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="min-w-[180px] text-xs uppercase tracking-wide text-muted-foreground">
-                      User Info
+                      用户信息
                     </TableHead>
                     <TableHead className="min-w-[120px] text-xs uppercase tracking-wide text-muted-foreground">
-                      User ID
+                      用户 ID
                     </TableHead>
                     <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Role / Aud
+                      角色 / 受众
                     </TableHead>
                     <TableHead className="min-w-[140px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Confirmation
+                      确认状态
                     </TableHead>
                     <TableHead className="min-w-[180px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Timestamps
+                      时间戳
                     </TableHead>
                     <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Quota
+                      配额
                     </TableHead>
                     <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Metadata
+                      元数据
                     </TableHead>
                     <TableHead className="min-w-[240px] text-xs uppercase tracking-wide text-muted-foreground">
-                      YouTube Accounts
+                      YouTube 账户
                     </TableHead>
                     <TableHead className="min-w-[80px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Actions
+                      操作
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -365,17 +365,17 @@ export function SystemUsers() {
                         {/* User Info */}
                         <TableCell className="align-top">
                           <div className="font-medium">
-                            {row.email || "(no email)"}
+                            {row.email || "(无邮箱)"}
                           </div>
                           {row.phone && (
                             <div className="text-xs text-muted-foreground">
-                              Phone: {row.phone}
+                              电话: {row.phone}
                             </div>
                           )}
                           <div className="mt-1 flex items-center gap-1">
                             {row.is_anonymous && (
                               <Badge variant="outline" className="text-xs">
-                                Anonymous
+                                匿名
                               </Badge>
                             )}
                           </div>
@@ -390,11 +390,11 @@ export function SystemUsers() {
                         <TableCell className="align-top">
                           <div className="space-y-1 text-xs">
                             <div>
-                              <span className="text-muted-foreground">Role: </span>
+                              <span className="text-muted-foreground">角色: </span>
                               {row.role ?? "-"}
                             </div>
                             <div>
-                              <span className="text-muted-foreground">Aud: </span>
+                              <span className="text-muted-foreground">受众: </span>
                               {row.aud ?? "-"}
                             </div>
                           </div>
@@ -404,22 +404,22 @@ export function SystemUsers() {
                         <TableCell className="align-top">
                           <div className="space-y-1 text-xs">
                             <div className="flex items-center gap-1">
-                              <span className="text-muted-foreground">Email: </span>
+                              <span className="text-muted-foreground">邮箱: </span>
                               {row.email_confirmed_at ? (
                                 <Badge variant="secondary" className="text-xs">
-                                  Confirmed
+                                  已确认
                                 </Badge>
                               ) : (
                                 <Badge variant="outline" className="text-xs">
-                                  Unconfirmed
+                                  未确认
                                 </Badge>
                               )}
                             </div>
                             <div className="flex items-center gap-1">
-                              <span className="text-muted-foreground">Phone: </span>
+                              <span className="text-muted-foreground">电话: </span>
                               {row.phone_confirmed_at ? (
                                 <Badge variant="secondary" className="text-xs">
-                                  Confirmed
+                                  已确认
                                 </Badge>
                               ) : (
                                 <Badge variant="outline" className="text-xs">
@@ -433,9 +433,9 @@ export function SystemUsers() {
                         {/* Timestamps */}
                         <TableCell className="align-top">
                           <div className="space-y-1 text-xs text-muted-foreground">
-                            <div>Created: {formatTime(row.created_at)}</div>
-                            <div>Confirmed: {formatTime(row.confirmed_at)}</div>
-                            <div>Last Sign-In: {formatTime(row.last_sign_in_at)}</div>
+                            <div>创建: {formatTime(row.created_at)}</div>
+                            <div>确认: {formatTime(row.confirmed_at)}</div>
+                            <div>最后登录: {formatTime(row.last_sign_in_at)}</div>
                           </div>
                         </TableCell>
 
@@ -455,7 +455,7 @@ export function SystemUsers() {
                               return (
                                 <div className="space-y-1">
                                   <div className="font-medium text-sm">
-                                    Video: {formatSeconds(videoUsed)} / {formatSeconds(videoTotal)}
+                                    视频: {formatSeconds(videoUsed)} / {formatSeconds(videoTotal)}
                                   </div>
                                   <div className="w-full bg-muted rounded-full h-2">
                                     <div
@@ -469,25 +469,25 @@ export function SystemUsers() {
                                     />
                                   </div>
                                   <div className="text-xs text-muted-foreground">
-                                    {formatSeconds(videoRemaining)} remaining - Max{" "}
+                                    {formatSeconds(videoRemaining)} 剩余 - 最大{" "}
                                     {formatSeconds(row.quota.max_video_seconds)}
                                   </div>
                                   <div className="text-xs text-muted-foreground">
-                                    Chat: {formatSeconds(chatUsed)} / {formatSeconds(chatTotal)}
+                                    聊天: {formatSeconds(chatUsed)} / {formatSeconds(chatTotal)}
                                   </div>
                                 </div>
                               );
                             })()
                           ) : (
-                            <span className="text-xs text-muted-foreground">No quota</span>
+                            <span className="text-xs text-muted-foreground">无配额</span>
                           )}
                         </TableCell>
 
                         {/* Metadata */}
                         <TableCell className="align-top">
                           <div className="flex flex-col gap-1">
-                            <MetadataCell data={row.app_metadata} title="App Metadata" />
-                            <MetadataCell data={row.user_metadata} title="User Metadata" />
+                            <MetadataCell data={row.app_metadata} title="应用元数据" />
+                            <MetadataCell data={row.user_metadata} title="用户元数据" />
                           </div>
                         </TableCell>
 
@@ -509,7 +509,7 @@ export function SystemUsers() {
                   ) : (
                     <TableRow>
                       <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                        No users found
+                        未找到用户
                       </TableCell>
                     </TableRow>
                   )}
@@ -522,7 +522,7 @@ export function SystemUsers() {
               <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-4 text-sm text-muted-foreground">
                   <span>
-                    Page {page} of {totalPages} · Showing {rows.length} of {total} users
+                    第 {page} 页，共 {totalPages} 页 · 显示 {rows.length} / {total} 个用户
                   </span>
                   <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
                     <SelectTrigger className="h-8 w-[120px]">

@@ -37,26 +37,26 @@ import {
 import { ChevronDown, ChevronUp, Eye, Loader2, RefreshCw, Sparkles } from "lucide-react";
 
 const STATUS_OPTIONS = [
-  { value: "all", label: "All statuses" },
-  { value: "pending", label: "Pending" },
-  { value: "active", label: "Active" },
-  { value: "error", label: "Error" }
+  { value: "all", label: "所有状态" },
+  { value: "pending", label: "待处理" },
+  { value: "active", label: "活跃" },
+  { value: "error", label: "错误" }
 ];
 
 const ANALYSIS_STATUS_OPTIONS = [
-  { value: "all", label: "All analysis statuses" },
-  { value: "none", label: "No analysis" },
-  { value: "queued", label: "Queued" },
-  { value: "processing", label: "Processing" },
-  { value: "completed", label: "Completed" },
-  { value: "failed", label: "Failed" }
+  { value: "all", label: "所有分析状态" },
+  { value: "none", label: "无分析" },
+  { value: "queued", label: "已排队" },
+  { value: "processing", label: "处理中" },
+  { value: "completed", label: "已完成" },
+  { value: "failed", label: "失败" }
 ];
 
 const PAGE_SIZE_OPTIONS = [
-  { value: "10", label: "10 / page" },
-  { value: "20", label: "20 / page" },
-  { value: "50", label: "50 / page" },
-  { value: "100", label: "100 / page" }
+  { value: "10", label: "每页 10 条" },
+  { value: "20", label: "每页 20 条" },
+  { value: "50", label: "每页 50 条" },
+  { value: "100", label: "每页 100 条" }
 ];
 
 function formatTime(value: string | null | undefined) {
@@ -85,6 +85,27 @@ function getAnalysisBadgeVariant(status: string | null) {
   if (status === "failed") return "destructive";
   if (status === "queued" || status === "processing") return "default";
   return "outline";
+}
+
+function translateStatus(status: string) {
+  const statusMap: Record<string, string> = {
+    pending: "待处理",
+    active: "活跃",
+    error: "错误"
+  };
+  return statusMap[status] ?? status;
+}
+
+function translateAnalysisStatus(status: string | null) {
+  if (!status) return "无分析";
+  const statusMap: Record<string, string> = {
+    none: "无分析",
+    queued: "已排队",
+    processing: "处理中",
+    completed: "已完成",
+    failed: "失败"
+  };
+  return statusMap[status] ?? status;
 }
 
 function TruncatedText({
@@ -130,7 +151,7 @@ function CopyableId({ id, label }: { id: string | null | undefined; label?: stri
       <TooltipContent>
         {label ? `${label}: ` : ""}{id}
         <br />
-        <span className="text-xs opacity-70">Click to copy</span>
+        <span className="text-xs opacity-70">点击复制</span>
       </TooltipContent>
     </Tooltip>
   );
@@ -258,13 +279,13 @@ export function Videos() {
     <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
       <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <CardTitle>Videos Library</CardTitle>
+          <CardTitle>视频库</CardTitle>
           <CardDescription>
-            Filter videos and manually queue Gemini analysis for selected items.
+            筛选视频并手动为选定项目排队 Gemini 分析。
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="secondary">{rows.length} videos</Badge>
+          <Badge variant="secondary">{rows.length} 个视频</Badge>
           <Button
             variant="outline"
             size="sm"
@@ -272,7 +293,7 @@ export function Videos() {
             disabled={videosQuery.isFetching}
           >
             <RefreshCw className={videosQuery.isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-            Refresh
+            刷新
           </Button>
         </div>
       </CardHeader>
@@ -287,7 +308,7 @@ export function Videos() {
             className="mb-4"
           >
             {showFilters ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            Filters
+            筛选
             {activeFilterCount > 0 && (
               <Badge variant="secondary" className="ml-2">
                 {activeFilterCount}
@@ -299,34 +320,34 @@ export function Videos() {
             <form onSubmit={handleApply} className="rounded-lg border border-border/70 bg-muted/20 p-4">
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="space-y-2">
-                  <Label htmlFor="filter-user">User ID</Label>
+                  <Label htmlFor="filter-user">用户 ID</Label>
                   <Input
                     id="filter-user"
-                    placeholder="Filter by user UUID"
+                    placeholder="按用户 UUID 筛选"
                     value={formUserId}
                     onChange={(e) => setFormUserId(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="filter-youtube-video">YouTube Video ID</Label>
+                  <Label htmlFor="filter-youtube-video">YouTube 视频 ID</Label>
                   <Input
                     id="filter-youtube-video"
-                    placeholder="e.g. dQw4w9WgXcQ"
+                    placeholder="例如: dQw4w9WgXcQ"
                     value={formYoutubeVideoId}
                     onChange={(e) => setFormYoutubeVideoId(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="filter-title">Title (contains)</Label>
+                  <Label htmlFor="filter-title">标题（包含）</Label>
                   <Input
                     id="filter-title"
-                    placeholder="Search by title"
+                    placeholder="按标题搜索"
                     value={formTitle}
                     onChange={(e) => setFormTitle(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="filter-status">Status</Label>
+                  <Label htmlFor="filter-status">状态</Label>
                   <Select value={formStatus} onValueChange={setFormStatus}>
                     <SelectTrigger id="filter-status">
                       <SelectValue />
@@ -341,7 +362,7 @@ export function Videos() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="filter-analysis-status">Analysis Status</Label>
+                  <Label htmlFor="filter-analysis-status">分析状态</Label>
                   <Select value={formAnalysisStatus} onValueChange={setFormAnalysisStatus}>
                     <SelectTrigger id="filter-analysis-status">
                       <SelectValue />
@@ -358,10 +379,10 @@ export function Videos() {
               </div>
               <div className="mt-4 flex items-center gap-2">
                 <Button type="submit" size="sm">
-                  Apply Filters
+                  应用筛选
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={handleReset}>
-                  Reset
+                  重置
                 </Button>
               </div>
             </form>
@@ -383,7 +404,7 @@ export function Videos() {
         ) : videosQuery.error ? (
           <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
             <AlertDescription>
-              Failed to load videos: {String(videosQuery.error)}
+              加载视频失败: {String(videosQuery.error)}
             </AlertDescription>
           </Alert>
         ) : (
@@ -393,25 +414,25 @@ export function Videos() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="min-w-[200px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Video
+                      视频
                     </TableHead>
                     <TableHead className="min-w-[140px] text-xs uppercase tracking-wide text-muted-foreground">
-                      IDs
+                      ID
                     </TableHead>
                     <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Status
+                      状态
                     </TableHead>
                     <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Analysis
+                      分析
                     </TableHead>
                     <TableHead className="min-w-[140px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Timestamps
+                      时间戳
                     </TableHead>
                     <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Details
+                      详情
                     </TableHead>
                     <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      Action
+                      操作
                     </TableHead>
                   </TableRow>
                 </TableHeader>
@@ -434,7 +455,7 @@ export function Videos() {
                               YT: {row.youtube_video_id}
                             </div>
                             <div className="text-xs text-muted-foreground">
-                              Duration: {row.duration ?? "-"}
+                              时长: {row.duration ?? "-"}
                             </div>
                           </TableCell>
 
@@ -442,11 +463,11 @@ export function Videos() {
                           <TableCell className="align-top">
                             <div className="space-y-1">
                               <div className="text-xs">
-                                <span className="text-muted-foreground">Video: </span>
+                                <span className="text-muted-foreground">视频: </span>
                                 <CopyableId id={row.id} />
                               </div>
                               <div className="text-xs">
-                                <span className="text-muted-foreground">User: </span>
+                                <span className="text-muted-foreground">用户: </span>
                                 <CopyableId id={row.user_id} />
                               </div>
                             </div>
@@ -455,11 +476,11 @@ export function Videos() {
                           {/* Status */}
                           <TableCell className="align-top">
                             <Badge variant={getStatusBadgeVariant(row.status)} className="capitalize">
-                              {row.status}
+                              {translateStatus(row.status)}
                             </Badge>
                             {row.removed_at && (
                               <div className="mt-1 text-xs text-muted-foreground">
-                                Removed: {formatTime(row.removed_at)}
+                                已移除: {formatTime(row.removed_at)}
                               </div>
                             )}
                           </TableCell>
@@ -467,10 +488,10 @@ export function Videos() {
                           {/* Analysis Status */}
                           <TableCell className="align-top">
                             <Badge variant={getAnalysisBadgeVariant(row.analysis_status)}>
-                              {row.analysis_status ?? "none"}
+                              {translateAnalysisStatus(row.analysis_status)}
                             </Badge>
                             <div className="mt-1 text-xs text-muted-foreground">
-                              {row.analysis_count} total
+                              共 {row.analysis_count} 次
                             </div>
                             {row.analysis_model && (
                               <div className="text-xs text-muted-foreground">
@@ -481,12 +502,12 @@ export function Videos() {
 
                           {/* Timestamps */}
                           <TableCell className="align-top">
-                            <div className="space-y-1 text-xs text-muted-foreground">
-                              <div>Created: {formatTime(row.created_at)}</div>
-                              {row.analysis_created_at && (
-                                <div>Analysis: {formatTime(row.analysis_created_at)}</div>
-                              )}
-                            </div>
+                          <div className="space-y-1 text-xs text-muted-foreground">
+                            <div>创建: {formatTime(row.created_at)}</div>
+                            {row.analysis_created_at && (
+                              <div>分析: {formatTime(row.analysis_created_at)}</div>
+                            )}
+                          </div>
                           </TableCell>
 
                           {/* Detail Buttons */}
@@ -499,13 +520,13 @@ export function Videos() {
                                   className="h-7 px-2"
                                   onClick={() =>
                                     setDetailDialog({
-                                      title: "Analysis Result",
+                                      title: "分析结果",
                                       content: row.analysis_text ?? ""
                                     })
                                   }
                                 >
                                   <Eye className="mr-1 h-3 w-3" />
-                                  Text
+                                  文本
                                 </Button>
                               )}
                               {row.analysis_error && (
@@ -515,13 +536,13 @@ export function Videos() {
                                   className="h-7 px-2 text-destructive"
                                   onClick={() =>
                                     setDetailDialog({
-                                      title: "Analysis Error",
+                                      title: "分析错误",
                                       content: row.analysis_error ?? ""
                                     })
                                   }
                                 >
                                   <Eye className="mr-1 h-3 w-3" />
-                                  Error
+                                  错误
                                 </Button>
                               )}
                             </div>
@@ -540,12 +561,12 @@ export function Videos() {
                                     {isPending ? (
                                       <>
                                         <Loader2 className="h-4 w-4 animate-spin" />
-                                        Queuing...
+                                        排队中...
                                       </>
                                     ) : (
                                       <>
                                         <Sparkles className="h-4 w-4" />
-                                        {row.analysis_status ? "Re-run" : "Analyze"}
+                                        {row.analysis_status ? "重新运行" : "分析"}
                                       </>
                                     )}
                                   </Button>
@@ -553,10 +574,10 @@ export function Videos() {
                               </TooltipTrigger>
                               <TooltipContent>
                                 {canAnalyze
-                                  ? "Queue analysis"
+                                  ? "排队分析"
                                   : isLocked
-                                    ? "Analysis is already queued or processing"
-                                    : "Only active videos can be analyzed"}
+                                    ? "分析已排队或正在处理中"
+                                    : "只有活跃的视频才能被分析"}
                               </TooltipContent>
                             </Tooltip>
                           </TableCell>
@@ -566,7 +587,7 @@ export function Videos() {
                   ) : (
                     <TableRow>
                       <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                        No videos found for the current filters.
+                        当前筛选条件下未找到视频。
                       </TableCell>
                     </TableRow>
                   )}
@@ -579,7 +600,7 @@ export function Videos() {
               <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-4 text-sm text-muted-foreground">
                   <span>
-                    Page {page} · Showing {rows.length} videos
+                    第 {page} 页 · 显示 {rows.length} 个视频
                   </span>
                   <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
                     <SelectTrigger className="h-8 w-[120px]">
@@ -640,7 +661,7 @@ export function Videos() {
           <DialogContent className="max-h-[80vh] max-w-2xl overflow-hidden">
             <DialogHeader>
               <DialogTitle>{detailDialog?.title}</DialogTitle>
-              <DialogDescription>Full content view</DialogDescription>
+              <DialogDescription>完整内容视图</DialogDescription>
             </DialogHeader>
             <div className="max-h-[60vh] overflow-auto">
               <pre className="whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/50 p-4 text-sm">

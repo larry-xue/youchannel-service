@@ -176,11 +176,11 @@ export function AdminUsers() {
     e.preventDefault();
     setError(null);
     if (!email.trim()) {
-      setError("Email is required");
+      setError("邮箱是必填项");
       return;
     }
     if (createNew && !password.trim()) {
-      setError("Password is required when creating new user");
+      setError("创建新用户时密码是必填项");
       return;
     }
     addMutation.mutate({
@@ -207,15 +207,15 @@ export function AdminUsers() {
     <div className="grid gap-6 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
       <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
         <CardHeader>
-          <CardTitle>Add Admin User</CardTitle>
+          <CardTitle>添加管理员用户</CardTitle>
           <CardDescription>
-            Add a new administrator by email address. You can add an existing user or create a new one.
+            通过邮箱地址添加新的管理员。您可以添加现有用户或创建新用户。
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAdd} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">邮箱</Label>
               <Input
                 id="email"
                 type="email"
@@ -241,28 +241,28 @@ export function AdminUsers() {
                 />
                 <div>
                   <Label htmlFor="createNew" className="text-sm font-medium">
-                    Create new user if missing
+                    如果用户不存在则创建新用户
                   </Label>
                   <p className="text-xs text-muted-foreground">
-                    Enable this to create a new account and set an initial password.
+                    启用此选项以创建新账户并设置初始密码。
                   </p>
                 </div>
               </div>
             </div>
             {createNew && (
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">密码</Label>
                 <Input
                   id="password"
                   type="password"
-                  placeholder="Set a temporary password"
+                  placeholder="设置临时密码"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={addMutation.isPending}
                   required={createNew}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Minimum 6 characters. Ask the user to rotate it after first login.
+                  最少 6 个字符。请提醒用户在首次登录后修改密码。
                 </p>
               </div>
             )}
@@ -270,12 +270,12 @@ export function AdminUsers() {
               {addMutation.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  {createNew ? "Creating..." : "Adding..."}
+                  {createNew ? "创建中..." : "添加中..."}
                 </>
               ) : (
                 <>
                   <Plus className="h-4 w-4" />
-                  {createNew ? "Create & Add" : "Add Admin"}
+                  {createNew ? "创建并添加" : "添加管理员"}
                 </>
               )}
             </Button>
@@ -291,13 +291,13 @@ export function AdminUsers() {
       <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
         <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <CardTitle>Admin Users</CardTitle>
+            <CardTitle>管理员用户</CardTitle>
             <CardDescription>
-              List of all users with administrator access.
+              所有拥有管理员访问权限的用户列表。
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{rows.length} admins</Badge>
+            <Badge variant="secondary">{rows.length} 个管理员</Badge>
           </div>
         </CardHeader>
         <CardContent>
@@ -310,7 +310,7 @@ export function AdminUsers() {
           ) : adminUsersQuery.error ? (
             <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
               <AlertDescription>
-                Failed to load admin users: {String(adminUsersQuery.error)}
+                加载管理员用户失败: {String(adminUsersQuery.error)}
               </AlertDescription>
             </Alert>
           ) : (
@@ -318,47 +318,47 @@ export function AdminUsers() {
               <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
                 <div className="space-y-1">
                   <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Search
+                    搜索
                   </Label>
                   <Input
-                    placeholder="Filter by email, ID, phone, or role"
+                    placeholder="按邮箱、ID、电话或角色筛选"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Confirmed
+                    确认状态
                   </Label>
                   <Select
                     value={confirmedFilter}
                     onValueChange={(value) => setConfirmedFilter(value as ConfirmedFilter)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="All statuses" />
+                      <SelectValue placeholder="所有状态" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="confirmed">Email confirmed</SelectItem>
-                      <SelectItem value="unconfirmed">Email not confirmed</SelectItem>
+                      <SelectItem value="all">全部</SelectItem>
+                      <SelectItem value="confirmed">邮箱已确认</SelectItem>
+                      <SelectItem value="unconfirmed">邮箱未确认</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Last sign-in
+                    最后登录
                   </Label>
                   <Select
                     value={signinFilter}
                     onValueChange={(value) => setSigninFilter(value as SignInFilter)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Any time" />
+                      <SelectValue placeholder="任意时间" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">Any time</SelectItem>
-                      <SelectItem value="recent">Last 30 days</SelectItem>
-                      <SelectItem value="never">Never signed in</SelectItem>
+                      <SelectItem value="all">任意时间</SelectItem>
+                      <SelectItem value="recent">最近 30 天</SelectItem>
+                      <SelectItem value="never">从未登录</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -370,47 +370,47 @@ export function AdminUsers() {
                     onClick={resetFilters}
                     disabled={!filtersActive}
                   >
-                    Reset filters
+                    重置筛选
                   </Button>
                 </div>
               </div>
               <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant="outline">{filteredCount} shown</Badge>
-                {filtersActive && <Badge variant="secondary">Filters active</Badge>}
+                <Badge variant="outline">显示 {filteredCount} 条</Badge>
+                {filtersActive && <Badge variant="secondary">筛选已激活</Badge>}
               </div>
               <TooltipProvider>
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Email
+                        邮箱
                       </TableHead>
                       <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        User ID
+                        用户 ID
                       </TableHead>
                       <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Admin since
+                        管理员自
                       </TableHead>
                       <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Created
+                        创建时间
                       </TableHead>
                       <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Last sign-in
+                        最后登录
                       </TableHead>
                       <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Confirmed
+                        确认状态
                       </TableHead>
                       <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Phone
+                        电话
                       </TableHead>
                       <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Identities
+                        身份
                       </TableHead>
                       <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Metadata
+                        元数据
                       </TableHead>
                       <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Actions
+                        操作
                       </TableHead>
                     </TableRow>
                   </TableHeader>
@@ -428,14 +428,14 @@ export function AdminUsers() {
                           <TableRow key={row.user_id}>
                             <TableCell className="space-y-1">
                               <div className="flex items-center gap-2">
-                                <span className="font-medium">{row.email || "(no email)"}</span>
+                                <span className="font-medium">{row.email || "(无邮箱)"}</span>
                                 <Badge variant="outline" className="text-[11px]">
                                   {row.role ?? row.aud ?? "user"}
                                 </Badge>
                               </div>
                               {row.aud && (
                                 <div className="text-[11px] text-muted-foreground">
-                                  Audience: {row.aud}
+                                  受众: {row.aud}
                                 </div>
                               )}
                             </TableCell>
@@ -458,14 +458,14 @@ export function AdminUsers() {
                                   variant={emailConfirmed ? "secondary" : "outline"}
                                   className="text-[11px]"
                                 >
-                                  Email {emailConfirmed ? "confirmed" : "pending"}
+                                  邮箱 {emailConfirmed ? "已确认" : "待确认"}
                                 </Badge>
                                 {row.phone && (
                                   <Badge
                                     variant={phoneConfirmed ? "secondary" : "outline"}
                                     className="text-[11px]"
                                   >
-                                    Phone {phoneConfirmed ? "confirmed" : "pending"}
+                                    电话 {phoneConfirmed ? "已确认" : "待确认"}
                                   </Badge>
                                 )}
                               </div>
@@ -476,8 +476,7 @@ export function AdminUsers() {
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <Badge variant="outline" className="cursor-pointer text-[11px]">
-                                      {row.identities.length} identity
-                                      {row.identities.length > 1 ? "s" : ""}
+                                      {row.identities.length} 个身份
                                     </Badge>
                                   </TooltipTrigger>
                                   <TooltipContent className="text-xs leading-relaxed">
@@ -485,29 +484,29 @@ export function AdminUsers() {
                                   </TooltipContent>
                                 </Tooltip>
                               ) : (
-                                <span className="text-xs text-muted-foreground">None</span>
+                                <span className="text-xs text-muted-foreground">无</span>
                               )}
                             </TableCell>
                             <TableCell>
                               <Dialog>
                                 <DialogTrigger asChild>
                                   <Button variant="ghost" size="sm">
-                                    Details
+                                    详情
                                   </Button>
                                 </DialogTrigger>
                                 <DialogContent>
                                   <DialogHeader>
                                     <DialogTitle>
-                                      Metadata for {row.email ?? row.user_id}
+                                      {row.email ?? row.user_id} 的元数据
                                     </DialogTitle>
                                     <DialogDescription>
-                                      Full Supabase user payload and linked identities.
+                                      完整的 Supabase 用户数据和关联身份信息。
                                     </DialogDescription>
                                   </DialogHeader>
                                   <div className="space-y-4 text-xs">
                                     <div>
                                       <p className="text-[11px] font-semibold text-muted-foreground">
-                                        App metadata
+                                        应用元数据
                                       </p>
                                       <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-border/70 bg-muted/40 p-3 font-mono text-[11px] text-muted-foreground">
 {metadataToJson(row.app_metadata)}
@@ -515,7 +514,7 @@ export function AdminUsers() {
                                     </div>
                                     <div>
                                       <p className="text-[11px] font-semibold text-muted-foreground">
-                                        User metadata
+                                        用户元数据
                                       </p>
                                       <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-border/70 bg-muted/40 p-3 font-mono text-[11px] text-muted-foreground">
 {metadataToJson(row.user_metadata)}
@@ -523,7 +522,7 @@ export function AdminUsers() {
                                     </div>
                                     <div>
                                       <p className="text-[11px] font-semibold text-muted-foreground">
-                                        Identities
+                                        身份信息
                                       </p>
                                       {row.identities.length ? (
                                         <div className="space-y-2 pt-2">
@@ -543,7 +542,7 @@ export function AdminUsers() {
                                         </div>
                                       ) : (
                                         <p className="text-xs text-muted-foreground pt-2">
-                                          No linked identities.
+                                          无关联身份信息。
                                         </p>
                                       )}
                                     </div>
@@ -551,7 +550,7 @@ export function AdminUsers() {
                                   <DialogFooter>
                                     <DialogClose asChild>
                                       <Button variant="outline" size="sm">
-                                        Close
+                                        关闭
                                       </Button>
                                     </DialogClose>
                                   </DialogFooter>
@@ -566,8 +565,8 @@ export function AdminUsers() {
                                 disabled={removeMutation.isPending || isCurrentUser}
                                 aria-label={
                                   isCurrentUser
-                                    ? "Cannot remove your own access"
-                                    : "Remove admin user"
+                                    ? "无法移除自己的访问权限"
+                                    : "移除管理员用户"
                                 }
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -582,7 +581,7 @@ export function AdminUsers() {
                           colSpan={columnCount}
                           className="py-8 text-center text-muted-foreground"
                         >
-                          No admin users found
+                          未找到管理员用户
                         </TableCell>
                       </TableRow>
                     )}
@@ -592,7 +591,7 @@ export function AdminUsers() {
               {filteredCount > rowsPerPage && (
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
                   <span>
-                    Showing {startIndex}-{endIndex} of {filteredCount}
+                    显示第 {startIndex}-{endIndex} 条，共 {filteredCount} 条
                   </span>
                   <Pagination>
                     <PaginationContent>
@@ -628,23 +627,23 @@ export function AdminUsers() {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove Admin User</DialogTitle>
+            <DialogTitle>移除管理员用户</DialogTitle>
             <DialogDescription>
-              Are you sure you want to remove this admin user? This action cannot be undone.
+              您确定要移除此管理员用户吗？此操作无法撤销。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-              Cancel
+              取消
             </Button>
             <Button variant="destructive" onClick={confirmRemove} disabled={removeMutation.isPending}>
               {removeMutation.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Removing...
+                  移除中...
                 </>
               ) : (
-                "Remove"
+                "移除"
               )}
             </Button>
           </DialogFooter>
