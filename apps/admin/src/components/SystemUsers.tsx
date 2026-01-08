@@ -50,6 +50,18 @@ function formatTime(value: string | null | undefined) {
   return date.toLocaleString();
 }
 
+function formatSeconds(value: number | null | undefined) {
+  if (value === null || value === undefined) return "-";
+  if (!Number.isFinite(value)) return "-";
+  const total = Math.max(0, Math.floor(value));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
 function shortId(value: string | null | undefined, length = 8) {
   if (!value) return "-";
   if (value.length <= length + 3) return value;
@@ -426,28 +438,43 @@ export function SystemUsers() {
                         {/* Quota */}
                         <TableCell className="align-top">
                           {row.quota ? (
-                            <div className="space-y-1">
-                              <div className="font-medium text-sm">
-                                {row.quota.analysis_count} / {row.quota.max_analyses}
-                              </div>
-                              <div className="w-full bg-muted rounded-full h-2">
-                                <div
-                                  className={`h-2 rounded-full transition-all ${
-                                    row.quota.analysis_count >= row.quota.max_analyses
-                                      ? "bg-destructive"
-                                      : row.quota.analysis_count >= row.quota.max_analyses * 0.8
-                                        ? "bg-yellow-500"
-                                        : "bg-primary"
-                                  }`}
-                                  style={{
-                                    width: `${Math.min(100, (row.quota.analysis_count / row.quota.max_analyses) * 100)}%`
-                                  }}
-                                />
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {row.quota.max_analyses - row.quota.analysis_count} remaining
-                              </div>
-                            </div>
+                            (() => {
+                              const videoTotal = row.quota.video_seconds_total ?? 0;
+                              const videoRemaining = row.quota.video_seconds_remaining ?? 0;
+                              const videoUsed = Math.max(0, videoTotal - videoRemaining);
+                              const videoPercent =
+                                videoTotal > 0 ? Math.min(100, (videoUsed / videoTotal) * 100) : 0;
+                              const chatTotal = row.quota.chat_seconds_total ?? 0;
+                              const chatRemaining = row.quota.chat_seconds_remaining ?? 0;
+                              const chatUsed = Math.max(0, chatTotal - chatRemaining);
+
+                              return (
+                                <div className="space-y-1">
+                                  <div className="font-medium text-sm">
+                                    Video: {formatSeconds(videoUsed)} / {formatSeconds(videoTotal)}
+                                  </div>
+                                  <div className="w-full bg-muted rounded-full h-2">
+                                    <div
+                                      className={`h-2 rounded-full transition-all ${
+                                        videoPercent >= 100
+                                          ? "bg-destructive"
+                                          : videoPercent >= 80
+                                            ? "bg-yellow-500"
+                                            : "bg-primary"
+                                      }`}
+                                      style={{ width: `${videoPercent}%` }}
+                                    />
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {formatSeconds(videoRemaining)} remaining - Max{" "}
+                                    {formatSeconds(row.quota.max_video_seconds)}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Chat: {formatSeconds(chatUsed)} / {formatSeconds(chatTotal)}
+                                  </div>
+                                </div>
+                              );
+                            })()
                           ) : (
                             <span className="text-xs text-muted-foreground">No quota</span>
                           )}

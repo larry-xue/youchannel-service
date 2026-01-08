@@ -32,8 +32,13 @@ export type YoutubeAccountSummary = {
 };
 
 export type UserQuotaInfo = {
-  analysis_count: number;
-  max_analyses: number;
+  video_seconds_total: number;
+  video_seconds_remaining: number;
+  chat_seconds_total: number;
+  chat_seconds_remaining: number;
+  max_video_seconds: number;
+  period_start_at: string | null;
+  period_end_at: string | null;
 } | null;
 
 export type SystemUserRow = {

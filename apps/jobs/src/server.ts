@@ -40,8 +40,13 @@ type YoutubeAccountSummary = {
 };
 
 type UserQuotaInfo = {
-  analysis_count: number;
-  max_analyses: number;
+  video_seconds_total: number;
+  video_seconds_remaining: number;
+  chat_seconds_total: number;
+  chat_seconds_remaining: number;
+  max_video_seconds: number;
+  period_start_at: string | null;
+  period_end_at: string | null;
 } | null;
 
 type SystemUserRow = {
@@ -543,7 +548,11 @@ export async function buildServer(params: {
     const [users, youtubeAccounts, quotasResult] = await Promise.all([
       listAllAuthUsers(supabase),
       listAllYoutubeAccounts(supabase),
-      supabase.from("user_quotas").select("user_id, analysis_count, max_analyses")
+      supabase
+        .from("user_quotas")
+        .select(
+          "user_id, video_seconds_total, video_seconds_remaining, chat_seconds_total, chat_seconds_remaining, max_video_seconds, period_start_at, period_end_at"
+        )
     ]);
 
     if (quotasResult.error) {
@@ -564,8 +573,13 @@ export async function buildServer(params: {
     const quotasByUser = new Map<string, UserQuotaInfo>();
     for (const quota of quotasResult.data ?? []) {
       quotasByUser.set(quota.user_id, {
-        analysis_count: quota.analysis_count,
-        max_analyses: quota.max_analyses
+        video_seconds_total: quota.video_seconds_total,
+        video_seconds_remaining: quota.video_seconds_remaining,
+        chat_seconds_total: quota.chat_seconds_total,
+        chat_seconds_remaining: quota.chat_seconds_remaining,
+        max_video_seconds: quota.max_video_seconds,
+        period_start_at: quota.period_start_at ?? null,
+        period_end_at: quota.period_end_at ?? null
       });
     }
 

@@ -1,8 +1,5 @@
-import { createHash } from "crypto";
 import type { PgBoss } from "pg-boss";
 import type { DbPool } from "./db.js";
-
-const ANALYSIS_MAX_DURATION_SEC = 3600;
 
 export type AnalysisCandidate = {
   videoId: string;
@@ -27,6 +24,19 @@ type AnalysisStatusRow = {
   status: string;
 };
 
+function parseNumeric(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
 function parseDurationToSeconds(value?: string | null) {
   if (!value) return null;
   const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(value);
@@ -35,6 +45,25 @@ function parseDurationToSeconds(value?: string | null) {
   const minutes = Number(match[2] ?? 0);
   const seconds = Number(match[3] ?? 0);
   return hours * 3600 + minutes * 60 + seconds;
+}
+
+async function fetchMaxVideoSeconds(db: DbPool, userId: string) {
+  const result = await db.query<{ max_video_seconds: string | number | null }>(
+    `select max(max_video_seconds) as max_video_seconds
+     from quota_grants
+     where user_id = $1
+       and status = 'active'
+       and valid_from <= now()
+       and (valid_to is null or valid_to >= now())
+       and video_seconds_remaining > 0
+       and max_video_seconds > 0`,
+    [userId]
+  );
+  const maxValue = parseNumeric(result.rows[0]?.max_video_seconds);
+  if (!maxValue || maxValue <= 0) {
+    return null;
+  }
+  return maxValue;
 }
 
 export async function fetchAnalysisCandidates(
@@ -98,8 +127,13 @@ export async function enqueueAnalyses(params: {
     return { enqueued: 0, skipped: 0, skipReasons };
   }
 
+  const maxVideoSeconds = await fetchMaxVideoSeconds(params.db, params.userId);
   const withinDuration = params.candidates.filter((candidate) => {
-    if (candidate.durationSec !== null && candidate.durationSec > ANALYSIS_MAX_DURATION_SEC) {
+    if (
+      maxVideoSeconds !== null &&
+      candidate.durationSec !== null &&
+      candidate.durationSec > maxVideoSeconds
+    ) {
       skipReasons.duration_exceeded += 1;
       return false;
     }
@@ -143,32 +177,8 @@ export async function enqueueAnalyses(params: {
     return { enqueued: 0, skipped, skipReasons };
   }
 
-  await params.db.query(
-    `insert into user_quotas (user_id)
-     values ($1)
-     on conflict (user_id) do nothing`,
-    [params.userId]
-  );
-  const quotaResult = await params.db.query(
-    `select analysis_count, max_analyses
-     from user_quotas
-     where user_id = $1`,
-    [params.userId]
-  );
-  const quotaRow = quotaResult.rows[0] as { analysis_count: number; max_analyses: number } | undefined;
-
-  if (!quotaRow) {
-    skipReasons.quota_exceeded += filtered.length;
-    return { enqueued: 0, skipped: params.candidates.length, skipReasons };
-  }
-
-  const remaining = Math.max(0, quotaRow.max_analyses - quotaRow.analysis_count);
-  const toQueue = remaining > 0 ? filtered.slice(0, remaining) : [];
-  const quotaSkipped = filtered.length - toQueue.length;
-  skipReasons.quota_exceeded += quotaSkipped;
-
   let enqueued = 0;
-  for (const candidate of toQueue) {
+  for (const candidate of filtered) {
     const queued = await params.db.query<{ id: string }>(
       `insert into video_analyses (
          video_id,
@@ -226,15 +236,6 @@ export async function enqueueAnalyses(params: {
     } else {
       skipReasons.already_queued += 1;
     }
-  }
-
-  if (enqueued > 0) {
-    await params.db.query(
-      `update user_quotas
-       set analysis_count = analysis_count + $1
-       where user_id = $2`,
-      [enqueued, params.userId]
-    );
   }
 
   const skipped = params.candidates.length - enqueued;

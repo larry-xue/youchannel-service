@@ -6,7 +6,6 @@ import { captureException } from "./sentry.js";
 import type { Config } from "./config.js";
 import type { DbPool } from "./db.js";
 
-const ANALYSIS_MAX_DURATION_SEC = 3600;
 const ANALYSIS_PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
 const ANALYSIS_SUMMARY_MIN_LENGTH = 20;
 const ANALYSIS_TIMESTAMP_PATTERN = "^\\d{2}:\\d{2}$|^\\d{1,2}:\\d{2}:\\d{2}$";
@@ -585,13 +584,72 @@ async function updateVideoAnalysis(db: DbPool, params: {
   );
 }
 
-async function refundAnalysisQuota(db: DbPool, userId: string) {
-  await db.query(
-    `update user_quotas
-     set analysis_count = greatest(analysis_count - 1, 0)
-     where user_id = $1`,
-    [userId]
+function buildRefundIdempotencyKey(jobId: string) {
+  return `refund:${jobId}`;
+}
+
+async function consumeAnalysisQuota(db: DbPool, params: {
+  userId: string;
+  videoSeconds: number;
+  videoDurationSeconds: number;
+  idempotencyKey: string;
+  referenceId: string;
+  context?: Record<string, unknown> | null;
+}) {
+  const result = await db.query<{ event_id: string }>(
+    `select public.consume_quota(
+       $1::uuid,
+       $2::bigint,
+       $3::bigint,
+       $4::bigint,
+       $5::text,
+       $6::text,
+       $7::text,
+       $8::text,
+       $9::jsonb
+     ) as event_id`,
+    [
+      params.userId,
+      params.videoSeconds,
+      0,
+      params.videoDurationSeconds,
+      params.idempotencyKey,
+      "video_analysis",
+      "video",
+      params.referenceId,
+      params.context ? JSON.stringify(params.context) : null
+    ]
   );
+
+  const eventId = result.rows[0]?.event_id;
+  if (!eventId) {
+    throw new Error("consume_quota did not return an event id");
+  }
+  return eventId;
+}
+
+async function refundAnalysisQuota(db: DbPool, params: {
+  userId: string;
+  originalEventId: string;
+  idempotencyKey: string;
+  reason?: string;
+}) {
+  const result = await db.query<{ event_id: string }>(
+    `select public.refund_quota(
+       $1::uuid,
+       $2::uuid,
+       $3::text,
+       $4::text
+     ) as event_id`,
+    [
+      params.userId,
+      params.originalEventId,
+      params.idempotencyKey,
+      params.reason ?? null
+    ]
+  );
+
+  return result.rows[0]?.event_id ?? null;
 }
 
 async function generateGeminiAnalysis(params: {
@@ -689,7 +747,7 @@ export async function registerWorkers(params: {
     }
 
     const durationSec = parseDurationToSeconds(video.duration);
-    if (durationSec !== null && durationSec > ANALYSIS_MAX_DURATION_SEC) {
+    if (durationSec === null || durationSec <= 0) {
       const skipped = await upsertVideoAnalysisIfStatus(db, {
         videoId,
         userId,
@@ -706,7 +764,7 @@ export async function registerWorkers(params: {
         logger.info({ videoId, analysisId: current?.id }, "Analyze video skipped; already handled");
         return { status: current?.status ?? ANALYSIS_STATUS.skipped, analysisId: current?.id, reason: "analysis_exists" };
       }
-      logger.info({ videoId, analysisId: skipped.id }, "Analyze video skipped; duration exceeded");
+      logger.info({ videoId, analysisId: skipped.id }, "Analyze video skipped; duration missing");
       return { status: ANALYSIS_STATUS.skipped, reason: "duration_exceeded", analysisId: skipped.id };
     }
 
@@ -755,6 +813,26 @@ export async function registerWorkers(params: {
     }
 
     const analysisId = claimed.id;
+    const jobId = String(job.id ?? "");
+    if (!jobId) {
+      logger.error({ videoId, analysisId }, "Analyze video missing job id");
+      throw new Error("analyze.video missing job id");
+    }
+
+    let quotaEventId: string | null = null;
+    const refundQuota = async (reason: string) => {
+      if (!quotaEventId) return;
+      try {
+        await refundAnalysisQuota(db, {
+          userId,
+          originalEventId: quotaEventId,
+          idempotencyKey: buildRefundIdempotencyKey(jobId),
+          reason
+        });
+      } catch (error) {
+        logger.error({ videoId, analysisId, err: error }, "Analyze video refund failed");
+      }
+    };
 
     if (!config.geminiApiKey) {
       const errorMessage = "GEMINI_API_KEY is not configured";
@@ -768,9 +846,40 @@ export async function registerWorkers(params: {
         skipReason: null,
         failedCountUpdate: "increment"
       });
-      await refundAnalysisQuota(db, userId);
+      await refundQuota("config_missing");
       logger.error({ videoId, analysisId }, errorMessage);
       return { status: ANALYSIS_STATUS.failed, analysisId, error: errorMessage };
+    }
+
+    try {
+      quotaEventId = await consumeAnalysisQuota(db, {
+        userId,
+        videoSeconds: durationSec,
+        videoDurationSeconds: durationSec,
+        idempotencyKey: jobId,
+        referenceId: videoId,
+        context: {
+          job_id: jobId,
+          analysis_id: analysisId,
+          model
+        }
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "quota_exceeded";
+      await updateVideoAnalysis(db, {
+        id: analysisId,
+        status: ANALYSIS_STATUS.skipped,
+        model,
+        analysisText: "Skipped: quota_exceeded",
+        usage: null,
+        error: null,
+        skipReason: "quota_exceeded"
+      });
+      logger.info(
+        { videoId, analysisId, errorMessage },
+        "Analyze video skipped; quota exceeded"
+      );
+      return { status: ANALYSIS_STATUS.skipped, analysisId, reason: "quota_exceeded" };
     }
 
     const videoUrl = buildYoutubeVideoUrl(video.youtube_video_id);
@@ -799,7 +908,7 @@ export async function registerWorkers(params: {
         skipReason: null,
         failedCountUpdate: "increment"
       });
-      await refundAnalysisQuota(db, userId);
+      await refundQuota("gemini_error");
       if (retryable) {
         logger.warn({ videoId, analysisId, status, errorMessage: message }, "Analyze video retryable error");
         throw error;
@@ -824,7 +933,7 @@ export async function registerWorkers(params: {
         skipReason: null,
         failedCountUpdate: "increment"
       });
-      await refundAnalysisQuota(db, userId);
+      await refundQuota("invalid_output");
       captureException(error);
       logger.error(
         { videoId, analysisId, err: error, errorMessage },
