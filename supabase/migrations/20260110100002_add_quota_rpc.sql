@@ -147,11 +147,13 @@ BEGIN
       INSERT INTO public.quota_usage_splits (
         event_id,
         grant_id,
+        user_id,
         video_seconds_delta,
         chat_seconds_delta
       ) VALUES (
         v_event_id,
         v_grant.id,
+        p_user_id,
         -v_deduct_video, -- stored as negative
         -v_deduct_chat   -- stored as negative
       );
@@ -293,11 +295,13 @@ BEGIN
     INSERT INTO public.quota_usage_splits (
       event_id,
       grant_id,
+      user_id,
       video_seconds_delta,
       chat_seconds_delta
     ) VALUES (
       v_refund_event_id,
       v_split.grant_id,
+      p_user_id,
       v_split_refund_video,
       v_split_refund_chat
     );
