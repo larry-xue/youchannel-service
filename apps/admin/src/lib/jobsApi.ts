@@ -86,9 +86,7 @@ export type AdminUserRow = {
 
 export type AdminVideoRow = {
   id: string;
-  playlist_id: string;
-  playlist_user_id: string;
-  playlist_youtube_id: string;
+  user_id: string;
   youtube_video_id: string;
   title: string | null;
   duration: string | null;
@@ -107,7 +105,6 @@ export type AdminVideoRow = {
 
 export type AdminVideosParams = {
   userId?: string;
-  playlistId?: string;
   youtubeVideoId?: string;
   title?: string;
   status?: string;
@@ -132,10 +129,9 @@ export function fetchAdminVideos(
 
 export function enqueueAnalysis(
   token: string,
-  payload: { playlistId: string; userId?: string; videoIds?: string[]; limit?: number }
+  payload: { userId: string; videoIds?: string[]; limit?: number; prompt?: string }
 ) {
   return request<{
-    playlistId: string;
     userId: string;
     candidateCount: number;
     enqueued: number;

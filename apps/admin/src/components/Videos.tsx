@@ -148,7 +148,6 @@ export function Videos() {
 
   // Filter form state
   const [formUserId, setFormUserId] = useState("");
-  const [formPlaylistId, setFormPlaylistId] = useState("");
   const [formYoutubeVideoId, setFormYoutubeVideoId] = useState("");
   const [formTitle, setFormTitle] = useState("");
   const [formStatus, setFormStatus] = useState("all");
@@ -180,8 +179,7 @@ export function Videos() {
   const analyzeMutation = useMutation({
     mutationFn: (row: AdminVideoRow) =>
       enqueueAnalysis(token ?? "", {
-        playlistId: row.playlist_id,
-        userId: row.playlist_user_id,
+        userId: row.user_id,
         videoIds: [row.id]
       }),
     onSuccess: () => {
@@ -201,7 +199,6 @@ export function Videos() {
     event.preventDefault();
     setFilters({
       userId: formUserId.trim() || undefined,
-      playlistId: formPlaylistId.trim() || undefined,
       youtubeVideoId: formYoutubeVideoId.trim() || undefined,
       title: formTitle.trim() || undefined,
       status: formStatus === "all" ? undefined : formStatus,
@@ -212,7 +209,6 @@ export function Videos() {
 
   const handleReset = () => {
     setFormUserId("");
-    setFormPlaylistId("");
     setFormYoutubeVideoId("");
     setFormTitle("");
     setFormStatus("all");
@@ -309,15 +305,6 @@ export function Videos() {
                     placeholder="Filter by user UUID"
                     value={formUserId}
                     onChange={(e) => setFormUserId(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="filter-playlist">Playlist ID</Label>
-                  <Input
-                    id="filter-playlist"
-                    placeholder="Filter by playlist UUID"
-                    value={formPlaylistId}
-                    onChange={(e) => setFormPlaylistId(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
@@ -460,15 +447,7 @@ export function Videos() {
                               </div>
                               <div className="text-xs">
                                 <span className="text-muted-foreground">User: </span>
-                                <CopyableId id={row.playlist_user_id} />
-                              </div>
-                              <div className="text-xs">
-                                <span className="text-muted-foreground">Playlist: </span>
-                                <CopyableId id={row.playlist_id} />
-                              </div>
-                              <div className="text-xs">
-                                <span className="text-muted-foreground">YT PL: </span>
-                                <CopyableId id={row.playlist_youtube_id} />
+                                <CopyableId id={row.user_id} />
                               </div>
                             </div>
                           </TableCell>

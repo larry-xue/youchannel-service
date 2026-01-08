@@ -40,7 +40,7 @@ function parseDurationToSeconds(value?: string | null) {
 export async function fetchAnalysisCandidates(
   db: DbPool,
   params: {
-    playlistId: string;
+    userId: string;
     videoIds?: string[];
     limit?: number;
   }
@@ -49,9 +49,9 @@ export async function fetchAnalysisCandidates(
     return [];
   }
 
-  const values: Array<string | number | string[]> = [params.playlistId];
+  const values: Array<string | number | string[]> = [params.userId];
   // Filter by status = 'active' instead of sync_status = 'synced'
-  const conditions: string[] = ["playlist_id = $1", "status = 'active'"];
+  const conditions: string[] = ["user_id = $1", "status = 'active'"];
 
   if (params.videoIds && params.videoIds.length > 0) {
     values.push(params.videoIds);
@@ -83,7 +83,6 @@ export async function enqueueAnalyses(params: {
   boss: PgBoss;
   db: DbPool;
   userId: string;
-  playlistId: string;
   prompt: string;
   model: string;
   candidates: AnalysisCandidate[];
@@ -173,7 +172,6 @@ export async function enqueueAnalyses(params: {
     const queued = await params.db.query<{ id: string }>(
       `insert into video_analyses (
          video_id,
-         playlist_id,
          user_id,
          analysis_text,
          model,
@@ -181,10 +179,9 @@ export async function enqueueAnalyses(params: {
          status,
          error,
          skip_reason
-       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8)
        on conflict (video_id)
        do update set
-         playlist_id = excluded.playlist_id,
          user_id = excluded.user_id,
          status = excluded.status,
          error = null,
@@ -194,7 +191,6 @@ export async function enqueueAnalyses(params: {
        returning id`,
       [
         candidate.videoId,
-        params.playlistId,
         params.userId,
         "",
         params.model,
@@ -219,7 +215,6 @@ export async function enqueueAnalyses(params: {
       "analyze.video",
       {
         videoId: candidate.videoId,
-        playlistId: params.playlistId,
         userId: params.userId,
         prompt: params.prompt
       },

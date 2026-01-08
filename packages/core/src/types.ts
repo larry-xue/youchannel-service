@@ -14,7 +14,6 @@ export type SyncRunRow = {
 export type JobRunRow = {
   id: string;
   sync_run_id: string;
-  playlist_id: string | null;
   user_id: string | null;
   job_name: string;
   status: JobRunStatus;

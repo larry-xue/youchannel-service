@@ -10,7 +10,6 @@ import type { Config } from "./config.js";
 import { enqueueAnalyses, fetchAnalysisCandidates } from "./analysis.js";
 import { createAdminGuard } from "./admin-auth.js";
 import {
-  getPlaylistForAnalysis,
   listAdminVideos,
   type DbPool
 } from "./db.js";
@@ -63,6 +62,9 @@ type SystemUserRow = {
   quota: UserQuotaInfo;
 };
 
+const DEFAULT_ANALYSIS_PROMPT =
+  "Summarize the video in 5 bullet points and call out key insights.";
+
 function parseTimestamp(value: string | null | undefined) {
   if (!value) return 0;
   const parsed = Date.parse(value);
@@ -93,6 +95,13 @@ function parseRequiredString(value: unknown) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseOptionalString(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function parseOptionalQueryString(value: string | string[] | undefined) {
@@ -254,14 +263,14 @@ export async function buildServer(params: {
 
   app.post("/openapi/analysis", { preHandler: requireServiceKey }, async (request, reply) => {
     const body = request.body as Record<string, unknown> | null;
-    const playlistId = parseRequiredString(body?.playlistId);
     const userId = parseRequiredString(body?.userId);
     const videoIds = normalizeUnique(parseStringArray(body?.videoIds));
     const limit = parseLimit(body?.limit);
+    const prompt = parseOptionalString(body?.prompt) ?? DEFAULT_ANALYSIS_PROMPT;
 
-    if (!playlistId || !userId) {
+    if (!userId) {
       reply.code(400);
-      return { error: "missing_playlist_or_user" };
+      return { error: "missing_user" };
     }
 
     if (videoIds === null) {
@@ -274,19 +283,8 @@ export async function buildServer(params: {
       return { error: "invalid_limit" };
     }
 
-    const playlist = await getPlaylistForAnalysis(db, playlistId);
-    if (!playlist) {
-      reply.code(404);
-      return { error: "playlist_not_found" };
-    }
-
-    if (playlist.user_id !== userId) {
-      reply.code(403);
-      return { error: "forbidden" };
-    }
-
     const candidates = await fetchAnalysisCandidates(db, {
-      playlistId,
+      userId,
       videoIds,
       limit
     });
@@ -300,14 +298,12 @@ export async function buildServer(params: {
       boss,
       db,
       userId,
-      playlistId,
-      prompt: playlist.analysis_prompt,
+      prompt,
       model: config.geminiModel,
       candidates
     });
 
     return {
-      playlistId,
       userId,
       candidateCount: candidates.length,
       enqueued: result.enqueued,
@@ -351,14 +347,14 @@ export async function buildServer(params: {
 
   app.post("/admin/analysis", { preHandler: requireAdmin }, async (request, reply) => {
     const body = request.body as Record<string, unknown> | null;
-    const playlistId = parseRequiredString(body?.playlistId);
     const userId = parseRequiredString(body?.userId);
     const videoIds = normalizeUnique(parseStringArray(body?.videoIds));
     const limit = parseLimit(body?.limit);
+    const prompt = parseOptionalString(body?.prompt) ?? DEFAULT_ANALYSIS_PROMPT;
 
-    if (!playlistId) {
+    if (!userId) {
       reply.code(400);
-      return { error: "missing_playlist" };
+      return { error: "missing_user" };
     }
 
     if (videoIds === null) {
@@ -371,20 +367,8 @@ export async function buildServer(params: {
       return { error: "invalid_limit" };
     }
 
-    const playlist = await getPlaylistForAnalysis(db, playlistId);
-    if (!playlist) {
-      reply.code(404);
-      return { error: "playlist_not_found" };
-    }
-
-    if (userId && playlist.user_id !== userId) {
-      reply.code(400);
-      return { error: "user_mismatch" };
-    }
-
-    const actingUserId = userId ?? playlist.user_id;
     const candidates = await fetchAnalysisCandidates(db, {
-      playlistId,
+      userId,
       videoIds,
       limit
     });
@@ -397,16 +381,14 @@ export async function buildServer(params: {
     const result = await enqueueAnalyses({
       boss,
       db,
-      userId: actingUserId,
-      playlistId,
-      prompt: playlist.analysis_prompt,
+      userId,
+      prompt,
       model: config.geminiModel,
       candidates
     });
 
     return {
-      playlistId,
-      userId: actingUserId,
+      userId,
       candidateCount: candidates.length,
       enqueued: result.enqueued,
       skipped: result.skipped,

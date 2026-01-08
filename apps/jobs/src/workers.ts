@@ -242,14 +242,12 @@ const ANALYSIS_MUTABLE_STATUSES: AnalysisStatus[] = [
 
 type AnalyzeVideoPayload = {
   videoId: string;
-  playlistId: string;
   userId: string;
   prompt: string;
 };
 
 type VideoAnalysisTarget = {
   id: string;
-  playlist_id: string;
   user_id: string;
   youtube_video_id: string;
   title: string | null;
@@ -470,8 +468,7 @@ function classifyGeminiError(error: unknown) {
 async function fetchVideoForAnalysis(db: DbPool, videoId: string) {
   const result = await db.query<VideoAnalysisTarget>(
     `select v.id,
-            v.playlist_id,
-            p.user_id,
+            v.user_id,
             v.youtube_video_id,
             v.title,
             v.description,
@@ -479,7 +476,6 @@ async function fetchVideoForAnalysis(db: DbPool, videoId: string) {
             v.status,
             v.raw
      from videos v
-     join playlists p on p.id = v.playlist_id
      where v.id = $1`,
     [videoId]
   );
@@ -502,7 +498,6 @@ async function upsertVideoAnalysisIfStatus(
   db: DbPool,
   params: {
     videoId: string;
-    playlistId: string;
     userId: string;
     status: AnalysisStatus;
     model: string;
@@ -516,7 +511,6 @@ async function upsertVideoAnalysisIfStatus(
   const result = await db.query<{ id: string; status: AnalysisStatus }>(
     `insert into video_analyses (
        video_id,
-       playlist_id,
        user_id,
        analysis_text,
        model,
@@ -524,10 +518,9 @@ async function upsertVideoAnalysisIfStatus(
        status,
        error,
        skip_reason
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8)
      on conflict (video_id)
      do update set
-       playlist_id = excluded.playlist_id,
        user_id = excluded.user_id,
        analysis_text = excluded.analysis_text,
        model = excluded.model,
@@ -535,11 +528,10 @@ async function upsertVideoAnalysisIfStatus(
        status = excluded.status,
        error = excluded.error,
        skip_reason = excluded.skip_reason
-     where video_analyses.status = any($10::text[])
+     where video_analyses.status = any($9::text[])
      returning id, status`,
     [
       params.videoId,
-      params.playlistId,
       params.userId,
       params.analysisText,
       params.model,
@@ -654,30 +646,27 @@ export async function registerWorkers(params: {
   const handleAnalyzeVideoJob = async (job: any) => {
     const payload = job.data as AnalyzeVideoPayload | null;
     const videoId = payload?.videoId;
-    const playlistId = payload?.playlistId;
     const userId = payload?.userId;
     const prompt = payload?.prompt;
 
-    if (!videoId || !playlistId || !userId || !prompt) {
+    if (!videoId || !userId || !prompt) {
       logger.error({ jobId: job.id }, "analyze.video missing required payload");
       throw new Error("analyze.video missing required payload");
     }
 
-    logger.info({ jobId: job.id, videoId, playlistId, userId }, "Analyze video started");
+    logger.info({ jobId: job.id, videoId, userId }, "Analyze video started");
 
     const video = await fetchVideoForAnalysis(db, videoId);
     if (!video) {
-      logger.warn({ videoId, playlistId, userId, jobId: job.id }, "Analyze video skipped; video missing");
+      logger.warn({ videoId, userId, jobId: job.id }, "Analyze video skipped; video missing");
       return { status: ANALYSIS_STATUS.skipped, reason: "video_missing" };
     }
 
-    if (video.playlist_id !== playlistId || video.user_id !== userId) {
+    if (video.user_id !== userId) {
       logger.error(
         {
           videoId,
-          playlistId,
           userId,
-          videoPlaylistId: video.playlist_id,
           videoUserId: video.user_id
         },
         "Analyze video payload mismatch"
@@ -703,7 +692,6 @@ export async function registerWorkers(params: {
     if (durationSec !== null && durationSec > ANALYSIS_MAX_DURATION_SEC) {
       const skipped = await upsertVideoAnalysisIfStatus(db, {
         videoId,
-        playlistId,
         userId,
         status: ANALYSIS_STATUS.skipped,
         model: config.geminiModel,
@@ -725,7 +713,6 @@ export async function registerWorkers(params: {
     if (video.status !== "active") {
       const skipped = await upsertVideoAnalysisIfStatus(db, {
         videoId,
-        playlistId,
         userId,
         status: ANALYSIS_STATUS.skipped,
         model: config.geminiModel,
@@ -747,7 +734,6 @@ export async function registerWorkers(params: {
     const model = config.geminiModel;
     const claimed = await upsertVideoAnalysisIfStatus(db, {
       videoId,
-      playlistId,
       userId,
       status: ANALYSIS_STATUS.processing,
       model,

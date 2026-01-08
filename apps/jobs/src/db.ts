@@ -2,18 +2,9 @@ import { Pool } from "pg";
 
 export type DbPool = Pool;
 
-export type PlaylistAnalysisTarget = {
-  id: string;
-  user_id: string;
-  entry_status: string;
-  analysis_prompt: string;
-};
-
 export type AdminVideoRow = {
   id: string;
-  playlist_id: string;
-  playlist_user_id: string;
-  playlist_youtube_id: string;
+  user_id: string;
   youtube_video_id: string;
   title: string | null;
   duration: string | null;
@@ -34,22 +25,10 @@ export function createDbPool(databaseUrl: string) {
   return new Pool({ connectionString: databaseUrl });
 }
 
-export async function getPlaylistForAnalysis(pool: DbPool, playlistId: string) {
-  const result = await pool.query<PlaylistAnalysisTarget>(
-    `select id, user_id, entry_status, analysis_prompt
-     from playlists
-     where id = $1`,
-    [playlistId]
-  );
-
-  return result.rows[0] ?? null;
-}
-
 export async function listAdminVideos(
   pool: DbPool,
   params: {
     userId?: string;
-    playlistId?: string;
     status?: string;
     analysisStatus?: string;
     youtubeVideoId?: string;
@@ -63,12 +42,7 @@ export async function listAdminVideos(
 
   if (params.userId) {
     values.push(params.userId);
-    conditions.push(`p.user_id = $${values.length}`);
-  }
-
-  if (params.playlistId) {
-    values.push(params.playlistId);
-    conditions.push(`v.playlist_id = $${values.length}`);
+    conditions.push(`v.user_id = $${values.length}`);
   }
 
   // Renamed from syncStatus to status
@@ -107,9 +81,7 @@ export async function listAdminVideos(
 
   const result = await pool.query<AdminVideoRow>(
     `select v.id,
-            v.playlist_id,
-            p.user_id as playlist_user_id,
-            p.playlist_id as playlist_youtube_id,
+            v.user_id,
             v.youtube_video_id,
             v.title,
             v.duration,
@@ -125,7 +97,6 @@ export async function listAdminVideos(
             la.created_at as analysis_created_at,
             la.updated_at as analysis_updated_at
      from videos v
-     join playlists p on p.id = v.playlist_id
      left join lateral (
        select count(*)::int as analysis_count
        from video_analyses
