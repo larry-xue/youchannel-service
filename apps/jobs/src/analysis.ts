@@ -223,13 +223,16 @@ export async function enqueueAnalyses(params: {
       continue;
     }
 
+    const analysisId = queued.rows[0].id;
+    // Use analysisId as singletonKey to avoid cross-video interference
     const bossJobId = await params.boss.send(
       "analyze.video",
       {
         videoId: candidate.videoId,
-        userId: params.userId
+        userId: params.userId,
+        analysisId
       },
-      { singletonKey: `analysis.${candidate.videoId}` }
+      { singletonKey: `analysis.${analysisId}` }
     );
 
     if (bossJobId) {

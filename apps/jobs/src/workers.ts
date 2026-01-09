@@ -6,7 +6,6 @@ import { captureException } from "./sentry.js";
 import type { Config } from "./config.js";
 import type { DbPool } from "./db.js";
 
-const ANALYSIS_PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
 const ANALYSIS_SUMMARY_MIN_LENGTH = 20;
 const ANALYSIS_TIMESTAMP_PATTERN = "^\\d{2}:\\d{2}$|^\\d{1,2}:\\d{2}:\\d{2}$";
 const ANALYSIS_TIMESTAMP_REGEX = /^(?:\d{2}:\d{2}|\d{1,2}:\d{2}:\d{2})$/;
@@ -242,6 +241,7 @@ const ANALYSIS_MUTABLE_STATUSES: AnalysisStatus[] = [
 type AnalyzeVideoPayload = {
   videoId: string;
   userId: string;
+  analysisId?: string; // Optional: provided by recovery or initial enqueue
 };
 
 type VideoAnalysisTarget = {
@@ -257,7 +257,37 @@ type VideoAnalysisTarget = {
 type AnalysisRecord = {
   id: string;
   status: AnalysisStatus;
-  updated_at: string | null;
+  claimed_at: string | null;
+  failed_count: number;
+};
+
+type CharacterEvidence = {
+  timestamp: string;
+  quote: string;
+};
+
+type AnalysisCharacter = {
+  name: string;
+  kind: string;
+  description: string;
+  traits: string[];
+  speaking_style: string;
+  notable_topics: string[];
+  evidence: CharacterEvidence[];
+};
+
+type TranscriptSegment = {
+  start: string;
+  end: string;
+  speaker: string;
+  text: string;
+};
+
+type AnalysisTranscript = {
+  language: string;
+  is_truncated: boolean;
+  cursor: string;
+  segments: TranscriptSegment[];
 };
 
 type AnalysisOutput = {
@@ -267,6 +297,8 @@ type AnalysisOutput = {
     title: string;
     details: string;
   }>;
+  characters: AnalysisCharacter[];
+  transcript: AnalysisTranscript;
 };
 
 type GeminiModel = Parameters<typeof createGeminiChat>[0];
@@ -290,7 +322,7 @@ function buildAnalysisPrompt() {
 }
 
 function buildYoutubeVideoUrl(videoId: string) {
-  return `https://www.youtube.com/watch?v=${videoId}`;
+  return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
 }
 
 function stripJsonFences(value: string) {
@@ -336,27 +368,53 @@ function parseTimestampToSeconds(value: string) {
 function isValidAnalysisOutput(value: unknown): value is AnalysisOutput {
   if (!value || typeof value !== "object") return false;
   const record = value as AnalysisOutput;
+  
+  // Validate summarize
   if (typeof record.summarize !== "string") return false;
-
   const summary = record.summarize.trim();
-  if (!summary) return false;
-  if (summary.length < ANALYSIS_SUMMARY_MIN_LENGTH) return false;
+  if (!summary || summary.length < ANALYSIS_SUMMARY_MIN_LENGTH) return false;
 
+  // Validate wiki
   if (!Array.isArray(record.wiki) || record.wiki.length === 0) return false;
-
   let lastSeconds: number | null = null;
   for (const item of record.wiki) {
     if (!item || typeof item !== "object") return false;
     const timestamp = item.timestamp?.trim();
     const title = item.title?.trim();
     const details = item.details?.trim();
-
     if (!timestamp || !title || !details) return false;
-
     const seconds = parseTimestampToSeconds(timestamp);
     if (seconds === null) return false;
     if (lastSeconds !== null && seconds < lastSeconds) return false;
     lastSeconds = seconds;
+  }
+
+  // Validate characters (required array, can be empty)
+  if (!Array.isArray(record.characters)) return false;
+  for (const char of record.characters) {
+    if (!char || typeof char !== "object") return false;
+    if (typeof char.name !== "string" || !char.name.trim()) return false;
+    if (typeof char.kind !== "string") return false;
+    if (typeof char.description !== "string") return false;
+    if (!Array.isArray(char.traits)) return false;
+    if (typeof char.speaking_style !== "string") return false;
+    if (!Array.isArray(char.notable_topics)) return false;
+    if (!Array.isArray(char.evidence)) return false;
+  }
+
+  // Validate transcript
+  if (!record.transcript || typeof record.transcript !== "object") return false;
+  const transcript = record.transcript;
+  if (typeof transcript.language !== "string") return false;
+  if (typeof transcript.is_truncated !== "boolean") return false;
+  if (typeof transcript.cursor !== "string") return false;
+  if (!Array.isArray(transcript.segments)) return false;
+  for (const seg of transcript.segments) {
+    if (!seg || typeof seg !== "object") return false;
+    if (typeof seg.start !== "string") return false;
+    if (typeof seg.end !== "string") return false;
+    if (typeof seg.speaker !== "string") return false;
+    if (typeof seg.text !== "string") return false;
   }
 
   return true;
@@ -411,11 +469,11 @@ function parseTimestampToMs(value?: string | null) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function isProcessingStale(record: AnalysisRecord | null) {
+function isProcessingStale(record: AnalysisRecord | null, config: Config) {
   if (!record || record.status !== ANALYSIS_STATUS.processing) return false;
-  const updatedAtMs = parseTimestampToMs(record.updated_at);
-  if (updatedAtMs === null) return false;
-  return Date.now() - updatedAtMs > ANALYSIS_PROCESSING_TIMEOUT_MS;
+  const claimedAtMs = parseTimestampToMs(record.claimed_at);
+  if (claimedAtMs === null) return false;
+  return Date.now() - claimedAtMs > config.analysisProcessingTimeoutMs;
 }
 
 const RETRYABLE_ERROR_CODES = new Set([
@@ -481,7 +539,7 @@ async function fetchVideoForAnalysis(db: DbPool, videoId: string) {
 
 async function fetchAnalysisRecord(db: DbPool, videoId: string) {
   const result = await db.query<AnalysisRecord>(
-    `select id, status, updated_at
+    `select id, status, claimed_at, failed_count
      from video_analyses
      where video_id = $1
      limit 1`,
@@ -503,13 +561,17 @@ async function upsertVideoAnalysisIfStatus(
     skipReason: string | null;
     allowedStatuses: AnalysisStatus[];
     instanceId?: string;
+    processingTimeoutMs?: number;
   }
 ) {
   // For processing status, set claimed_at and claimed_by
   const isProcessing = params.status === ANALYSIS_STATUS.processing;
-  const claimedAt = isProcessing ? "NOW()" : "NULL";
   const claimedBy = isProcessing && params.instanceId ? params.instanceId : null;
+  const timeoutMs = params.processingTimeoutMs ?? 15 * 60 * 1000; // Default 15 min
 
+  // P1-2 FIX: Move stale check into SQL WHERE clause to prevent race condition
+  // This ensures atomic check-and-update: only claim if status is allowed AND 
+  // either not processing OR processing but stale (claimed_at exceeded timeout)
   const result = await db.query<{ id: string; status: AnalysisStatus }>(
     `insert into video_analyses (
        video_id,
@@ -522,7 +584,7 @@ async function upsertVideoAnalysisIfStatus(
        skip_reason,
        claimed_at,
        claimed_by
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, ${claimedAt}, $9)
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $6 = 'processing' THEN NOW() ELSE NULL END, $9)
      on conflict (video_id)
      do update set
        user_id = excluded.user_id,
@@ -532,9 +594,15 @@ async function upsertVideoAnalysisIfStatus(
        status = excluded.status,
        error = excluded.error,
        skip_reason = excluded.skip_reason,
-       claimed_at = ${claimedAt},
-       claimed_by = excluded.claimed_by
+       claimed_at = CASE WHEN excluded.status = 'processing' THEN NOW() ELSE NULL END,
+       claimed_by = $9
      where video_analyses.status = any($10::text[])
+       and (
+         excluded.status <> 'processing'
+         or video_analyses.status <> 'processing'
+         or video_analyses.claimed_at IS NULL
+         or video_analyses.claimed_at < NOW() - ($11 * interval '1 millisecond')
+       )
      returning id, status`,
     [
       params.videoId,
@@ -546,7 +614,8 @@ async function upsertVideoAnalysisIfStatus(
       params.error,
       params.skipReason,
       claimedBy,
-      params.allowedStatuses
+      params.allowedStatuses,
+      timeoutMs
     ]
   );
 
@@ -573,12 +642,13 @@ async function updateVideoAnalysis(db: DbPool, params: {
   await db.query(
     `update video_analyses
      set analysis_text = $1,
-     model = $2,
-     usage = $3,
-     status = $4,
-     error = $5,
-     skip_reason = $6,
-     failed_count = ${failedCountExpression}
+         model = $2,
+         usage = $3,
+         status = $4,
+         error = $5,
+         skip_reason = $6,
+         failed_count = ${failedCountExpression},
+         updated_at = NOW()
      where id = $7`,
     [
       params.analysisText,
@@ -740,7 +810,7 @@ export async function registerWorkers(params: {
     }
 
     const existing = await fetchAnalysisRecord(db, videoId);
-    const processingStale = isProcessingStale(existing);
+    const processingStale = isProcessingStale(existing, config);
     const reclaimableStatuses = processingStale
       ? [...ANALYSIS_MUTABLE_STATUSES, ANALYSIS_STATUS.processing]
       : ANALYSIS_MUTABLE_STATUSES;
@@ -760,10 +830,10 @@ export async function registerWorkers(params: {
         userId,
         status: ANALYSIS_STATUS.skipped,
         model: config.geminiModel,
-        analysisText: "Skipped: duration_exceeded",
+        analysisText: "Skipped: duration_invalid",
         usage: null,
         error: null,
-        skipReason: "duration_exceeded",
+        skipReason: "duration_invalid",
         allowedStatuses: reclaimableStatuses
       });
       if (!skipped) {
@@ -771,8 +841,8 @@ export async function registerWorkers(params: {
         logger.info({ videoId, analysisId: current?.id }, "Analyze video skipped; already handled");
         return { status: current?.status ?? ANALYSIS_STATUS.skipped, analysisId: current?.id, reason: "analysis_exists" };
       }
-      logger.info({ videoId, analysisId: skipped.id }, "Analyze video skipped; duration missing");
-      return { status: ANALYSIS_STATUS.skipped, reason: "duration_exceeded", analysisId: skipped.id };
+      logger.info({ videoId, analysisId: skipped.id }, "Analyze video skipped; duration invalid");
+      return { status: ANALYSIS_STATUS.skipped, reason: "duration_invalid", analysisId: skipped.id };
     }
 
     const model = config.geminiModel;
@@ -786,7 +856,8 @@ export async function registerWorkers(params: {
       error: null,
       skipReason: null,
       allowedStatuses: reclaimableStatuses,
-      instanceId
+      instanceId,
+      processingTimeoutMs: config.analysisProcessingTimeoutMs
     });
 
     if (!claimed) {
@@ -843,7 +914,7 @@ export async function registerWorkers(params: {
         userId,
         videoSeconds: durationSec,
         videoDurationSeconds: durationSec,
-        idempotencyKey: jobId,
+        idempotencyKey: analysisId, // Use analysisId for stable idempotency across retries
         referenceId: videoId,
         context: {
           job_id: jobId,
@@ -852,21 +923,46 @@ export async function registerWorkers(params: {
         }
       });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "quota_exceeded";
-      await updateVideoAnalysis(db, {
-        id: analysisId,
-        status: ANALYSIS_STATUS.skipped,
-        model,
-        analysisText: "Skipped: quota_exceeded",
-        usage: null,
-        error: null,
-        skipReason: "quota_exceeded"
-      });
-      logger.info(
-        { videoId, analysisId, errorMessage },
-        "Analyze video skipped; quota exceeded"
-      );
-      return { status: ANALYSIS_STATUS.skipped, analysisId, reason: "quota_exceeded" };
+      const errorMessage = error instanceof Error ? error.message : "quota_error";
+      // Check if this is a business rejection (quota exceeded) vs system failure
+      const isQuotaExceeded = errorMessage.includes("insufficient") || 
+                              errorMessage.includes("exceeded") || 
+                              errorMessage.includes("quota");
+      
+      if (isQuotaExceeded) {
+        // Business rejection: skip the job
+        await updateVideoAnalysis(db, {
+          id: analysisId,
+          status: ANALYSIS_STATUS.skipped,
+          model,
+          analysisText: "Skipped: quota_exceeded",
+          usage: null,
+          error: null,
+          skipReason: "quota_exceeded"
+        });
+        logger.info(
+          { videoId, analysisId, errorMessage },
+          "Analyze video skipped; quota exceeded"
+        );
+        return { status: ANALYSIS_STATUS.skipped, analysisId, reason: "quota_exceeded" };
+      } else {
+        // System failure: mark as failed and throw for retry
+        await updateVideoAnalysis(db, {
+          id: analysisId,
+          status: ANALYSIS_STATUS.failed,
+          model,
+          analysisText: "Failed: quota_system_error",
+          usage: null,
+          error: errorMessage,
+          skipReason: null,
+          failedCountUpdate: "increment"
+        });
+        logger.error(
+          { videoId, analysisId, err: error, errorMessage },
+          "Analyze video failed; quota system error"
+        );
+        throw error; // Let pg-boss retry
+      }
     }
 
     const videoUrl = buildYoutubeVideoUrl(video.youtube_video_id);
@@ -894,11 +990,31 @@ export async function registerWorkers(params: {
         skipReason: null,
         failedCountUpdate: "increment"
       });
-      await refundQuota("gemini_error");
+      
       if (retryable) {
-        logger.warn({ videoId, analysisId, status, errorMessage: message }, "Analyze video retryable error");
+        // Check if retries are exhausted
+        const current = await fetchAnalysisRecord(db, videoId);
+        const failedCount = current?.failed_count ?? 0;
+        const maxRetries = config.analysisMaxRetryCount;
+        
+        if (failedCount >= maxRetries) {
+          // Retries exhausted - do terminal refund
+          await refundQuota("retries_exhausted");
+          logger.error(
+            { videoId, analysisId, failedCount, maxRetries, errorMessage: message },
+            "Analyze video retries exhausted; refunding quota"
+          );
+          return { status: ANALYSIS_STATUS.failed, analysisId, error: message, reason: "retries_exhausted" };
+        }
+        
+        // P0-1 FIX: Don't refund on retryable errors - the job will be retried
+        // with the same idempotency key, so quota is preserved for the retry
+        logger.warn({ videoId, analysisId, status, failedCount, errorMessage: message }, "Analyze video retryable error");
         throw error;
       }
+      
+      // Only refund for non-retryable (terminal) errors
+      await refundQuota("gemini_error");
       captureException(error);
       logger.error({ videoId, analysisId, err: error, errorMessage: message }, "Analyze video failed");
       return { status: ANALYSIS_STATUS.failed, analysisId, error: message };
@@ -919,13 +1035,30 @@ export async function registerWorkers(params: {
         skipReason: null,
         failedCountUpdate: "increment"
       });
-      await refundQuota("invalid_output");
-      captureException(error);
-      logger.error(
-        { videoId, analysisId, err: error, errorMessage },
-        "Analyze video response invalid"
+      
+      // Check if retries are exhausted
+      const current = await fetchAnalysisRecord(db, videoId);
+      const failedCount = current?.failed_count ?? 0;
+      const maxRetries = config.analysisMaxRetryCount;
+      
+      if (failedCount >= maxRetries) {
+        // Retries exhausted - do terminal refund
+        await refundQuota("retries_exhausted");
+        captureException(error);
+        logger.error(
+          { videoId, analysisId, failedCount, maxRetries, errorMessage },
+          "Analyze video invalid output retries exhausted; refunding quota"
+        );
+        return { status: ANALYSIS_STATUS.failed, analysisId, error: errorMessage, reason: "retries_exhausted" };
+      }
+      
+      // P0-1 FIX: Invalid output is retryable (model might return valid JSON on retry)
+      // Don't refund - throw to trigger retry instead
+      logger.warn(
+        { videoId, analysisId, failedCount, errorMessage },
+        "Analyze video response invalid; will retry"
       );
-      return { status: ANALYSIS_STATUS.failed, analysisId, error: errorMessage };
+      throw error;
     }
 
     await updateVideoAnalysis(db, {
