@@ -312,3 +312,20 @@ export function fetchQuotaInfo(token: string) {
   return request<QuotaInfo>("/admin/quota", token);
 }
 
+export type VideoAnalysisRow = {
+  id: string;
+  video_id: string;
+  user_id: string;
+  analysis_text: string;
+  model: string;
+  usage: Record<string, unknown> | null;
+  status: string;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export function fetchVideoAnalyses(token: string, videoId: string) {
+  return request<{ analyses: VideoAnalysisRow[] }>(`/admin/videos/${videoId}/analyses`, token);
+}
+

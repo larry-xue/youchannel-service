@@ -7,6 +7,7 @@ import {
   createColumnHelper,
   type PaginationState,
 } from "@tanstack/react-table";
+import { Link } from "@tanstack/react-router";
 import { useAuth } from "../lib/auth";
 import { enqueueAnalysis, fetchAdminVideos, type AdminVideoRow, type AdminVideosParams } from "../lib/jobsApi";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -32,7 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { ChevronDown, ChevronUp, Eye, Loader2, RefreshCw, Sparkles, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye, Loader2, RefreshCw, Sparkles, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search } from "lucide-react";
 
 const ANALYSIS_STATUS_OPTIONS = [
   { value: "all", label: "所有分析状态" },
@@ -356,32 +357,40 @@ export function Videos() {
           const isPending = analyzeMutation.isPending && analyzeMutation.variables?.id === row.id;
 
           return (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span tabIndex={!canAnalyze ? 0 : undefined}>
-                  <Button
-                    size="sm"
-                    onClick={() => analyzeMutation.mutate(row)}
-                    disabled={!canAnalyze || isPending}
-                  >
-                    {isPending ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        排队中...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-4 w-4" />
-                        {row.analysis_status ? "重新运行" : "分析"}
-                      </>
-                    )}
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {canAnalyze ? "排队分析" : "分析已排队或正在处理中"}
-              </TooltipContent>
-            </Tooltip>
+            <div className="flex items-center gap-2">
+              <Link to="/videos/$videoId/analyses" params={{ videoId: row.id }}>
+                <Button variant="outline" size="sm">
+                  <Search className="h-4 w-4" />
+                  查看分析
+                </Button>
+              </Link>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={!canAnalyze ? 0 : undefined}>
+                    <Button
+                      size="sm"
+                      onClick={() => analyzeMutation.mutate(row)}
+                      disabled={!canAnalyze || isPending}
+                    >
+                      {isPending ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          排队中...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4" />
+                          {row.analysis_status ? "重新运行" : "分析"}
+                        </>
+                      )}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {canAnalyze ? "排队分析" : "分析已排队或正在处理中"}
+                </TooltipContent>
+              </Tooltip>
+            </div>
           );
         },
       }),

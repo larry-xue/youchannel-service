@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
 import { AuthGate } from "./components/AuthGate";
 import { Dashboard } from "./components/Dashboard";
+import { VideoAnalyses } from "./components/VideoAnalyses";
 
 function RootLayout() {
   return (
@@ -50,6 +51,12 @@ const videosRoute = createRoute({
   component: Dashboard
 });
 
+const videoAnalysesRoute = createRoute({
+  getParentRoute: () => authRoute,
+  path: "videos/$videoId/analyses",
+  component: VideoAnalyses
+});
+
 const quotasRoute = createRoute({
   getParentRoute: () => authRoute,
   path: "quotas",
@@ -60,7 +67,7 @@ const quotasRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
-  authRoute.addChildren([dashboardRoute, systemUsersRoute, adminUsersRoute, videosRoute, quotasRoute])
+  authRoute.addChildren([dashboardRoute, systemUsersRoute, adminUsersRoute, videosRoute, videoAnalysesRoute, quotasRoute])
 ]);
 
 export const router = createRouter({
@@ -72,3 +79,4 @@ declare module "@tanstack/react-router" {
     router: typeof router;
   }
 }
+

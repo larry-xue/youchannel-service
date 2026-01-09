@@ -115,3 +115,30 @@ export async function listAdminVideos(
 
   return result.rows;
 }
+
+export type VideoAnalysisRow = {
+  id: string;
+  video_id: string;
+  user_id: string;
+  analysis_text: string;
+  model: string;
+  usage: Record<string, unknown> | null;
+  status: string;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function fetchVideoAnalyses(
+  pool: DbPool,
+  videoId: string
+): Promise<VideoAnalysisRow[]> {
+  const result = await pool.query<VideoAnalysisRow>(
+    `select id, video_id, user_id, analysis_text, model, usage, status, error, created_at, updated_at
+     from video_analyses
+     where video_id = $1
+     order by created_at desc`,
+    [videoId]
+  );
+  return result.rows;
+}

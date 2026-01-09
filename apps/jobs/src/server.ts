@@ -11,8 +11,10 @@ import { enqueueAnalyses, fetchAnalysisCandidates } from "./analysis.js";
 import { createAdminGuard } from "./admin-auth.js";
 import {
   listAdminVideos,
+  fetchVideoAnalyses,
   type DbPool
 } from "./db.js";
+
 
 type YoutubeAccountRow = {
   id: string;
@@ -480,6 +482,18 @@ export async function buildServer(params: {
     });
 
     return { rows };
+  });
+
+  app.get("/admin/videos/:videoId/analyses", { preHandler: requireAdmin }, async (request, reply) => {
+    const { videoId } = request.params as { videoId: string };
+
+    if (!videoId) {
+      reply.code(400);
+      return { error: "missing_video_id" };
+    }
+
+    const analyses = await fetchVideoAnalyses(db, videoId);
+    return { analyses };
   });
 
   app.post("/admin/analysis", { preHandler: requireAdmin }, async (request, reply) => {
