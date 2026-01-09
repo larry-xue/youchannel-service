@@ -67,8 +67,23 @@ type SystemUserRow = {
   quota: UserQuotaInfo;
 };
 
-const DEFAULT_ANALYSIS_PROMPT =
-  "Summarize the video in 5 bullet points and call out key insights.";
+type OpenApiVideoInput = {
+  youtubeVideoId: string;
+  title: string;
+  description: string;
+  thumbnailUrl: string;
+  publishedAt: string;
+  duration: string;
+  url: string;
+  raw: Record<string, unknown> | null;
+};
+
+type InsertedVideoRow = {
+  id: string;
+  youtube_video_id: string;
+  duration: string | null;
+};
+
 
 function parseTimestamp(value: string | null | undefined) {
   if (!value) return 0;
@@ -124,9 +139,123 @@ function parseStringArray(value: unknown) {
   return items;
 }
 
+function parseRequiredTimestamp(value: unknown) {
+  const raw = parseRequiredString(value);
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? null : raw;
+}
+
+function parseOptionalJsonRecord(value: unknown) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function parseDurationToSeconds(value: string) {
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(value);
+  if (!match) return null;
+  const hours = Number(match[1] ?? 0);
+  const minutes = Number(match[2] ?? 0);
+  const seconds = Number(match[3] ?? 0);
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function parseRequiredDuration(value: unknown) {
+  const raw = parseRequiredString(value);
+  if (!raw) return null;
+  const seconds = parseDurationToSeconds(raw);
+  if (seconds === null || seconds <= 0) return null;
+  return raw;
+}
+
+function parseOpenApiVideoInput(value: unknown): OpenApiVideoInput | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const youtubeVideoId = parseRequiredString(record.youtubeVideoId);
+  const title = parseRequiredString(record.title);
+  const description = parseRequiredString(record.description);
+  const thumbnailUrl = parseRequiredString(record.thumbnailUrl);
+  const publishedAt = parseRequiredTimestamp(record.publishedAt);
+  const duration = parseRequiredDuration(record.duration);
+  const url = parseRequiredString(record.url);
+  const raw = parseOptionalJsonRecord(record.raw);
+
+  if (
+    !youtubeVideoId ||
+    !title ||
+    !description ||
+    !thumbnailUrl ||
+    !publishedAt ||
+    !duration ||
+    !url ||
+    raw === undefined
+  ) {
+    return null;
+  }
+
+  return {
+    youtubeVideoId,
+    title,
+    description,
+    thumbnailUrl,
+    publishedAt,
+    duration,
+    url,
+    raw
+  };
+}
+
 function normalizeUnique(values?: string[] | null) {
   if (!values) return values;
   return Array.from(new Set(values));
+}
+
+async function insertOpenApiVideos(
+  db: DbPool,
+  userId: string,
+  videos: OpenApiVideoInput[]
+): Promise<InsertedVideoRow[]> {
+  if (videos.length === 0) return [];
+
+  const columns = [
+    "user_id",
+    "youtube_video_id",
+    "title",
+    "description",
+    "thumbnail_url",
+    "published_at",
+    "duration",
+    "url",
+    "raw"
+  ];
+
+  const values: Array<string | Record<string, unknown> | null> = [];
+  const placeholders = videos.map((video, index) => {
+    const base = index * columns.length;
+    values.push(
+      userId,
+      video.youtubeVideoId,
+      video.title,
+      video.description,
+      video.thumbnailUrl,
+      video.publishedAt,
+      video.duration,
+      video.url,
+      video.raw
+    );
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9})`;
+  });
+
+  const result = await db.query<InsertedVideoRow>(
+    `insert into videos (${columns.join(", ")})
+     values ${placeholders.join(", ")}
+     on conflict (user_id, youtube_video_id) do nothing
+     returning id, youtube_video_id, duration`,
+    values
+  );
+
+  return result.rows;
 }
 
 function parseLimit(value: unknown) {
@@ -269,48 +398,59 @@ export async function buildServer(params: {
   app.post("/openapi/analysis", { preHandler: requireServiceKey }, async (request, reply) => {
     const body = request.body as Record<string, unknown> | null;
     const userId = parseRequiredString(body?.userId);
-    const videoIds = normalizeUnique(parseStringArray(body?.videoIds));
-    const limit = parseLimit(body?.limit);
-    const prompt = parseOptionalString(body?.prompt) ?? DEFAULT_ANALYSIS_PROMPT;
+    const videosInput = body?.videos;
 
     if (!userId) {
       reply.code(400);
       return { error: "missing_user" };
     }
 
-    if (videoIds === null) {
+    if (!Array.isArray(videosInput) || videosInput.length === 0) {
       reply.code(400);
-      return { error: "invalid_video_ids" };
+      return { error: "missing_videos" };
     }
 
-    if (limit === null) {
+    const parsedVideos = videosInput.map(parseOpenApiVideoInput);
+    if (parsedVideos.some((video) => !video)) {
       reply.code(400);
-      return { error: "invalid_limit" };
+      return { error: "invalid_videos" };
     }
 
-    const candidates = await fetchAnalysisCandidates(db, {
-      userId,
-      videoIds,
-      limit
-    });
-
-    if (videoIds && candidates.length !== videoIds.length) {
-      reply.code(403);
-      return { error: "video_forbidden" };
+    const uniqueMap = new Map<string, OpenApiVideoInput>();
+    for (const video of parsedVideos as OpenApiVideoInput[]) {
+      if (!uniqueMap.has(video.youtubeVideoId)) {
+        uniqueMap.set(video.youtubeVideoId, video);
+      }
     }
+
+    const uniqueVideos = Array.from(uniqueMap.values());
+    const requestedCount = videosInput.length;
+    const uniqueCount = uniqueVideos.length;
+
+    const insertedRows = await insertOpenApiVideos(db, userId, uniqueVideos);
+    const insertedCount = insertedRows.length;
+    const existingCount = uniqueCount - insertedCount;
+
+    const candidates = insertedRows.map((row) => ({
+      videoId: row.id,
+      youtubeVideoId: row.youtube_video_id,
+      durationSec: row.duration ? parseDurationToSeconds(row.duration) : null
+    }));
 
     const result = await enqueueAnalyses({
       boss,
       db,
       userId,
-      prompt,
       model: config.geminiModel,
       candidates
     });
 
     return {
       userId,
-      candidateCount: candidates.length,
+      requestedCount,
+      uniqueCount,
+      insertedCount,
+      existingCount,
       enqueued: result.enqueued,
       skipped: result.skipped,
       skipReasons: result.skipReasons
@@ -320,7 +460,6 @@ export async function buildServer(params: {
   app.get("/admin/videos", { preHandler: requireAdmin }, async (request, reply) => {
     const query = request.query as Record<string, string | string[] | undefined>;
     const userId = parseOptionalQueryString(query.userId);
-    const status = parseOptionalQueryString(query.status);
     const limit = parseLimit(query.limit);
     const offset = parseOffset(query.offset);
 
@@ -334,15 +473,8 @@ export async function buildServer(params: {
       return { error: "invalid_offset" };
     }
 
-    const allowedStatuses = new Set(["pending", "active", "error"]);
-    if (status && !allowedStatuses.has(status)) {
-      reply.code(400);
-      return { error: "invalid_status" };
-    }
-
     const rows = await listAdminVideos(db, {
       userId,
-      status,
       limit: limit ?? 50,
       offset: offset ?? 0
     });
@@ -355,7 +487,6 @@ export async function buildServer(params: {
     const userId = parseRequiredString(body?.userId);
     const videoIds = normalizeUnique(parseStringArray(body?.videoIds));
     const limit = parseLimit(body?.limit);
-    const prompt = parseOptionalString(body?.prompt) ?? DEFAULT_ANALYSIS_PROMPT;
 
     if (!userId) {
       reply.code(400);
@@ -387,7 +518,6 @@ export async function buildServer(params: {
       boss,
       db,
       userId,
-      prompt,
       model: config.geminiModel,
       candidates
     });

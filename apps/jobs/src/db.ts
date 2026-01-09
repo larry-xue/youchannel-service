@@ -8,7 +8,6 @@ export type AdminVideoRow = {
   youtube_video_id: string;
   title: string | null;
   duration: string | null;
-  status: string;
   removed_at: string | null;
   created_at: string;
   analysis_count: number;
@@ -29,7 +28,6 @@ export async function listAdminVideos(
   pool: DbPool,
   params: {
     userId?: string;
-    status?: string;
     analysisStatus?: string;
     youtubeVideoId?: string;
     title?: string;
@@ -43,12 +41,6 @@ export async function listAdminVideos(
   if (params.userId) {
     values.push(params.userId);
     conditions.push(`v.user_id = $${values.length}`);
-  }
-
-  // Renamed from syncStatus to status
-  if (params.status) {
-    values.push(params.status);
-    conditions.push(`v.status = $${values.length}`);
   }
 
   if (params.analysisStatus) {
@@ -85,7 +77,6 @@ export async function listAdminVideos(
             v.youtube_video_id,
             v.title,
             v.duration,
-            v.status,
             v.removed_at,
             v.created_at,
             coalesce(ac.analysis_count, 0) as analysis_count,

@@ -79,8 +79,7 @@ export async function fetchAnalysisCandidates(
   }
 
   const values: Array<string | number | string[]> = [params.userId];
-  // Filter by status = 'active' instead of sync_status = 'synced'
-  const conditions: string[] = ["user_id = $1", "status = 'active'"];
+  const conditions: string[] = ["user_id = $1"];
 
   if (params.videoIds && params.videoIds.length > 0) {
     values.push(params.videoIds);
@@ -112,7 +111,6 @@ export async function enqueueAnalyses(params: {
   boss: PgBoss;
   db: DbPool;
   userId: string;
-  prompt: string;
   model: string;
   candidates: AnalysisCandidate[];
 }): Promise<AnalysisResult> {
@@ -225,8 +223,7 @@ export async function enqueueAnalyses(params: {
       "analyze.video",
       {
         videoId: candidate.videoId,
-        userId: params.userId,
-        prompt: params.prompt
+        userId: params.userId
       },
       { singletonKey: `analysis.${candidate.videoId}` }
     );

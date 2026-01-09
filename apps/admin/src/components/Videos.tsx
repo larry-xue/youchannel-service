@@ -34,13 +34,6 @@ import {
 } from "./ui/dialog";
 import { ChevronDown, ChevronUp, Eye, Loader2, RefreshCw, Sparkles, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 
-const STATUS_OPTIONS = [
-  { value: "all", label: "所有状态" },
-  { value: "pending", label: "待处理" },
-  { value: "active", label: "活跃" },
-  { value: "error", label: "错误" }
-];
-
 const ANALYSIS_STATUS_OPTIONS = [
   { value: "all", label: "所有分析状态" },
   { value: "none", label: "无分析" },
@@ -70,28 +63,12 @@ function shortId(value: string | null | undefined, length = 8) {
   return `${value.slice(0, length)}...`;
 }
 
-function getStatusBadgeVariant(status: string) {
-  if (status === "active") return "secondary";
-  if (status === "pending") return "outline";
-  if (status === "error") return "destructive";
-  return "outline";
-}
-
 function getAnalysisBadgeVariant(status: string | null) {
   if (!status) return "outline";
   if (status === "completed") return "secondary";
   if (status === "failed") return "destructive";
   if (status === "queued" || status === "processing") return "default";
   return "outline";
-}
-
-function translateStatus(status: string) {
-  const statusMap: Record<string, string> = {
-    pending: "待处理",
-    active: "活跃",
-    error: "错误"
-  };
-  return statusMap[status] ?? status;
 }
 
 function translateAnalysisStatus(status: string | null) {
@@ -171,7 +148,6 @@ export function Videos() {
   const [formUserId, setFormUserId] = useState("");
   const [formYoutubeVideoId, setFormYoutubeVideoId] = useState("");
   const [formTitle, setFormTitle] = useState("");
-  const [formStatus, setFormStatus] = useState("all");
   const [formAnalysisStatus, setFormAnalysisStatus] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
 
@@ -234,7 +210,6 @@ export function Videos() {
       userId: formUserId.trim() || undefined,
       youtubeVideoId: formYoutubeVideoId.trim() || undefined,
       title: formTitle.trim() || undefined,
-      status: formStatus === "all" ? undefined : formStatus,
       analysisStatus: formAnalysisStatus === "all" ? undefined : formAnalysisStatus
     });
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
@@ -244,7 +219,6 @@ export function Videos() {
     setFormUserId("");
     setFormYoutubeVideoId("");
     setFormTitle("");
-    setFormStatus("all");
     setFormAnalysisStatus("all");
     setFilters({});
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
@@ -288,24 +262,6 @@ export function Videos() {
                 <span className="text-muted-foreground">用户: </span>
                 <CopyableId id={row.user_id} />
               </div>
-            </div>
-          );
-        },
-      }),
-      columnHelper.accessor("status", {
-        header: "状态",
-        cell: (info) => {
-          const row = info.row.original;
-          return (
-            <div>
-              <Badge variant={getStatusBadgeVariant(row.status)} className="capitalize">
-                {translateStatus(row.status)}
-              </Badge>
-              {row.removed_at && (
-                <div className="mt-1 text-xs text-muted-foreground">
-                  已移除: {formatTime(row.removed_at)}
-                </div>
-              )}
             </div>
           );
         },
@@ -396,7 +352,7 @@ export function Videos() {
           const row = info.row.original;
           const analysisStatus = row.analysis_status ?? "";
           const isLocked = analysisStatus === "queued" || analysisStatus === "processing";
-          const canAnalyze = row.status === "active" && !isLocked;
+          const canAnalyze = !isLocked;
           const isPending = analyzeMutation.isPending && analyzeMutation.variables?.id === row.id;
 
           return (
@@ -423,11 +379,7 @@ export function Videos() {
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                {canAnalyze
-                  ? "排队分析"
-                  : isLocked
-                    ? "分析已排队或正在处理中"
-                    : "只有活跃的视频才能被分析"}
+                {canAnalyze ? "排队分析" : "分析已排队或正在处理中"}
               </TooltipContent>
             </Tooltip>
           );
@@ -519,21 +471,6 @@ export function Videos() {
                     value={formTitle}
                     onChange={(e) => setFormTitle(e.target.value)}
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="filter-status">状态</Label>
-                  <Select value={formStatus} onValueChange={setFormStatus}>
-                    <SelectTrigger id="filter-status">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STATUS_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="filter-analysis-status">分析状态</Label>

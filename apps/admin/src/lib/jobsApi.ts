@@ -95,7 +95,6 @@ export type AdminVideoRow = {
   youtube_video_id: string;
   title: string | null;
   duration: string | null;
-  status: string;
   removed_at: string | null;
   created_at: string;
   analysis_count: number;
@@ -112,7 +111,6 @@ export type AdminVideosParams = {
   userId?: string;
   youtubeVideoId?: string;
   title?: string;
-  status?: string;
   analysisStatus?: string;
   limit?: number;
   offset?: number;
@@ -120,11 +118,10 @@ export type AdminVideosParams = {
 
 export function fetchAdminVideos(
   token: string,
-  params?: { userId?: string; status?: string; limit?: number; offset?: number }
+  params?: { userId?: string; limit?: number; offset?: number }
 ) {
   const searchParams = new URLSearchParams();
   if (params?.userId) searchParams.set("userId", params.userId);
-  if (params?.status) searchParams.set("status", params.status);
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.offset) searchParams.set("offset", String(params.offset));
   const suffix = searchParams.toString();
@@ -134,7 +131,7 @@ export function fetchAdminVideos(
 
 export function enqueueAnalysis(
   token: string,
-  payload: { userId: string; videoIds?: string[]; limit?: number; prompt?: string }
+  payload: { userId: string; videoIds?: string[]; limit?: number }
 ) {
   return request<{
     userId: string;

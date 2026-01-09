@@ -242,7 +242,6 @@ const ANALYSIS_MUTABLE_STATUSES: AnalysisStatus[] = [
 type AnalyzeVideoPayload = {
   videoId: string;
   userId: string;
-  prompt: string;
 };
 
 type VideoAnalysisTarget = {
@@ -252,7 +251,6 @@ type VideoAnalysisTarget = {
   title: string | null;
   description: string | null;
   duration: string | null;
-  status: string;
   raw: Record<string, unknown> | null;
 };
 
@@ -472,7 +470,6 @@ async function fetchVideoForAnalysis(db: DbPool, videoId: string) {
             v.title,
             v.description,
             v.duration,
-            v.status,
             v.raw
      from videos v
      where v.id = $1`,
@@ -656,7 +653,6 @@ async function generateGeminiAnalysis(params: {
   apiKey: string;
   model: GeminiModel;
   videoUrl: string;
-  prompt: string;
 }) {
   const adapter = createGeminiChat(params.model, params.apiKey);
   const stream = chat({
@@ -705,9 +701,8 @@ export async function registerWorkers(params: {
     const payload = job.data as AnalyzeVideoPayload | null;
     const videoId = payload?.videoId;
     const userId = payload?.userId;
-    const prompt = payload?.prompt;
 
-    if (!videoId || !userId || !prompt) {
+    if (!videoId || !userId) {
       logger.error({ jobId: job.id }, "analyze.video missing required payload");
       throw new Error("analyze.video missing required payload");
     }
@@ -766,27 +761,6 @@ export async function registerWorkers(params: {
       }
       logger.info({ videoId, analysisId: skipped.id }, "Analyze video skipped; duration missing");
       return { status: ANALYSIS_STATUS.skipped, reason: "duration_exceeded", analysisId: skipped.id };
-    }
-
-    if (video.status !== "active") {
-      const skipped = await upsertVideoAnalysisIfStatus(db, {
-        videoId,
-        userId,
-        status: ANALYSIS_STATUS.skipped,
-        model: config.geminiModel,
-        analysisText: "Skipped: video_unavailable",
-        usage: null,
-        error: null,
-        skipReason: "video_unavailable",
-        allowedStatuses: reclaimableStatuses
-      });
-      if (!skipped) {
-        const current = await fetchAnalysisRecord(db, videoId);
-        logger.info({ videoId, analysisId: current?.id }, "Analyze video skipped; already handled");
-        return { status: current?.status ?? ANALYSIS_STATUS.skipped, analysisId: current?.id, reason: "analysis_exists" };
-      }
-      logger.info({ videoId, analysisId: skipped.id, status: video.status }, "Analyze video skipped; unavailable");
-      return { status: ANALYSIS_STATUS.skipped, reason: "video_unavailable", analysisId: skipped.id };
     }
 
     const model = config.geminiModel;
@@ -891,8 +865,7 @@ export async function registerWorkers(params: {
       const result = await generateGeminiAnalysis({
         apiKey: config.geminiApiKey,
         model: model as GeminiModel,
-        videoUrl,
-        prompt
+        videoUrl
       });
       responseText = result.content;
       usage = result.usage ?? null;
