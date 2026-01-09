@@ -209,11 +209,14 @@ export type QuotaGrant = {
   version: number;
   created_at: string;
   updated_at: string;
+  user_email?: string;
+  user_role?: string;
 };
 
 export type QuotaUsageEvent = {
   id: string;
   user_id: string;
+  user_email?: string;
   event_type: string;
   reason: string | null;
   reference_type: string | null;
@@ -224,6 +227,13 @@ export type QuotaUsageEvent = {
   context: Record<string, unknown> | null;
   idempotency_key: string;
   created_at: string;
+  quota_before: number | null;
+  quota_after: number | null;
+};
+
+export type QuotaInfo = {
+  grants: QuotaGrant[];
+  events: QuotaUsageEvent[];
 };
 
 export type QuotaCache = {
@@ -299,5 +309,9 @@ export function refreshQuotaCache(token: string, userId: string) {
       body: JSON.stringify({ userId })
     }
   );
+}
+
+export function fetchQuotaInfo(token: string) {
+  return request<QuotaInfo>("/admin/quota", token);
 }
 

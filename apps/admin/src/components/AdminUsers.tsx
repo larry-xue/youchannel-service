@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getPaginationRowModel,
+  flexRender,
+  createColumnHelper,
+  type PaginationState,
+} from "@tanstack/react-table";
 import { useAuth } from "../lib/auth";
 import { fetchAdminUsers, addAdminUser, removeAdminUser, type AdminUserRow } from "../lib/jobsApi";
 import { Badge } from "./ui/badge";
@@ -22,15 +30,8 @@ import {
   DialogTitle,
   DialogTrigger
 } from "./ui/dialog";
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationNext,
-  PaginationPrevious
-} from "./ui/pagination";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
-import { Plus, Trash2, Loader2 } from "lucide-react";
+import { Plus, Trash2, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 
 function formatTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -47,6 +48,8 @@ const RECENT_WINDOW_MS = 1000 * 60 * 60 * 24 * 30;
 const metadataToJson = (metadata: Record<string, unknown> | null) =>
   JSON.stringify(metadata ?? {}, null, 2);
 
+const columnHelper = createColumnHelper<AdminUserRow>();
+
 export function AdminUsers() {
   const { session } = useAuth();
   const token = session?.access_token;
@@ -60,7 +63,18 @@ export function AdminUsers() {
   const [search, setSearch] = useState("");
   const [confirmedFilter, setConfirmedFilter] = useState<ConfirmedFilter>("all");
   const [signinFilter, setSigninFilter] = useState<SignInFilter>("all");
-  const [page, setPage] = useState(1);
+
+  // Pagination State
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 10,
+  });
+
+  const PAGE_SIZE_OPTIONS = [
+    { value: "10", label: "每页 10 条" },
+    { value: "20", label: "每页 20 条" },
+    { value: "50", label: "每页 50 条" },
+  ];
 
   const adminUsersQuery = useQuery({
     queryKey: ["admin-users"],
@@ -144,34 +158,6 @@ export function AdminUsers() {
     });
   }, [rows, search, confirmedFilter, signinFilter]);
 
-  const rowsPerPage = 10;
-  const filteredCount = filteredRows.length;
-  const totalPages = Math.max(1, Math.ceil(filteredCount / rowsPerPage));
-  const currentRows = filteredRows.slice((page - 1) * rowsPerPage, page * rowsPerPage);
-  const hasPrevPage = page > 1;
-  const hasNextPage = page < totalPages;
-  const filtersActive = Boolean(search.trim() || confirmedFilter !== "all" || signinFilter !== "all");
-  const startIndex = filteredCount ? (page - 1) * rowsPerPage + 1 : 0;
-  const endIndex = filteredCount ? Math.min(filteredCount, page * rowsPerPage) : 0;
-  const columnCount = 10;
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, confirmedFilter, signinFilter]);
-
-  useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
-  }, [page, totalPages]);
-
-  const resetFilters = () => {
-    if (!filtersActive) return;
-    setSearch("");
-    setConfirmedFilter("all");
-    setSigninFilter("all");
-  };
-
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -202,6 +188,233 @@ export function AdminUsers() {
       setUserToDelete(null);
     }
   };
+
+  const resetFilters = () => {
+    setSearch("");
+    setConfirmedFilter("all");
+    setSigninFilter("all");
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+  };
+
+  const filtersActive = Boolean(search.trim() || confirmedFilter !== "all" || signinFilter !== "all");
+
+  const columns = useMemo(
+    () => [
+      columnHelper.accessor("email", {
+        header: "邮箱",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{row.email || "(无邮箱)"}</span>
+                <Badge variant="outline" className="text-[11px]">
+                  {row.role ?? row.aud ?? "user"}
+                </Badge>
+              </div>
+              {row.aud && (
+                <div className="text-[11px] text-muted-foreground">
+                  受众: {row.aud}
+                </div>
+              )}
+            </div>
+          );
+        },
+      }),
+      columnHelper.accessor("user_id", {
+        header: "用户 ID",
+        cell: (info) => (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="font-mono text-xs text-muted-foreground">
+                {info.getValue().slice(0, 8)}...
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs">{info.getValue()}</TooltipContent>
+          </Tooltip>
+        ),
+      }),
+      columnHelper.accessor("created_at", {
+        header: "管理员自",
+        cell: (info) => <span className="text-sm">{formatTime(info.getValue())}</span>,
+      }),
+      columnHelper.accessor("user_created_at", {
+        header: "创建时间",
+        cell: (info) => <span className="text-sm">{formatTime(info.getValue())}</span>,
+      }),
+      columnHelper.accessor("last_sign_in_at", {
+        header: "最后登录",
+        cell: (info) => <span className="text-sm">{formatTime(info.getValue())}</span>,
+      }),
+      columnHelper.display({
+        id: "confirmed",
+        header: "确认状态",
+        cell: (info) => {
+          const row = info.row.original;
+          const emailConfirmed = Boolean(row.email_confirmed_at ?? row.confirmed_at);
+          const phoneConfirmed = Boolean(row.phone_confirmed_at);
+          return (
+            <div className="flex flex-col gap-1">
+              <Badge
+                variant={emailConfirmed ? "secondary" : "outline"}
+                className="text-[11px]"
+              >
+                邮箱 {emailConfirmed ? "已确认" : "待确认"}
+              </Badge>
+              {row.phone && (
+                <Badge
+                  variant={phoneConfirmed ? "secondary" : "outline"}
+                  className="text-[11px]"
+                >
+                  电话 {phoneConfirmed ? "已确认" : "待确认"}
+                </Badge>
+              )}
+            </div>
+          );
+        },
+      }),
+      columnHelper.accessor("phone", {
+        header: "电话",
+        cell: (info) => <span className="text-sm">{info.getValue() ?? "-"}</span>,
+      }),
+      columnHelper.accessor("identities", {
+        header: "身份",
+        cell: (info) => {
+          const identities = info.getValue();
+          const identitySummary = identities
+            .map((identity: any) => identity.provider ?? "identity")
+            .join(", ");
+
+          if (!identities.length) return <span className="text-xs text-muted-foreground">无</span>;
+
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="cursor-pointer text-[11px]">
+                  {identities.length} 个身份
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent className="text-xs leading-relaxed">
+                {identitySummary}
+              </TooltipContent>
+            </Tooltip>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "metadata",
+        header: "元数据",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="sm">
+                  详情
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>
+                    {row.email ?? row.user_id} 的元数据
+                  </DialogTitle>
+                  <DialogDescription>
+                    完整的 Supabase 用户数据和关联身份信息。
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 text-xs">
+                  <div>
+                    <p className="text-[11px] font-semibold text-muted-foreground">
+                      应用元数据
+                    </p>
+                    <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-border/70 bg-muted/40 p-3 font-mono text-[11px] text-muted-foreground">
+                      {metadataToJson(row.app_metadata)}
+                    </pre>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold text-muted-foreground">
+                      用户元数据
+                    </p>
+                    <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-border/70 bg-muted/40 p-3 font-mono text-[11px] text-muted-foreground">
+                      {metadataToJson(row.user_metadata)}
+                    </pre>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold text-muted-foreground">
+                      身份信息
+                    </p>
+                    {row.identities.length ? (
+                      <div className="space-y-2 pt-2">
+                        {row.identities.map((identity) => (
+                          <div
+                            key={identity.id}
+                            className="rounded-md border border-border/70 bg-muted/40 p-2 text-[11px]"
+                          >
+                            <p className="font-semibold">
+                              {identity.provider ?? "identity"}
+                            </p>
+                            <pre className="max-h-32 overflow-auto font-mono text-[11px] text-muted-foreground">
+                              {metadataToJson(identity.identity_data)}
+                            </pre>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground pt-2">
+                        无关联身份信息。
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button variant="outline" size="sm">
+                      关闭
+                    </Button>
+                  </DialogClose>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "actions",
+        header: "操作",
+        cell: (info) => {
+          const row = info.row.original;
+          const isCurrentUser = row.user_id === session?.user.id;
+          return (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleRemove(row.user_id)}
+              disabled={removeMutation.isPending || isCurrentUser}
+              aria-label={
+                isCurrentUser
+                  ? "无法移除自己的访问权限"
+                  : "移除管理员用户"
+              }
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          );
+        },
+      }),
+    ],
+    [session?.user.id, handleRemove, removeMutation.isPending] // added dependencies for actions
+  );
+
+  const table = useReactTable({
+    data: filteredRows,
+    columns,
+    state: {
+      pagination,
+    },
+    onPaginationChange: setPagination,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  });
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
@@ -375,248 +588,124 @@ export function AdminUsers() {
                 </div>
               </div>
               <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant="outline">显示 {filteredCount} 条</Badge>
+                <Badge variant="outline">显示 {filteredRows.length} 条</Badge>
                 {filtersActive && <Badge variant="secondary">筛选已激活</Badge>}
               </div>
               <TooltipProvider>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        邮箱
-                      </TableHead>
-                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        用户 ID
-                      </TableHead>
-                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        管理员自
-                      </TableHead>
-                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        创建时间
-                      </TableHead>
-                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        最后登录
-                      </TableHead>
-                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        确认状态
-                      </TableHead>
-                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        电话
-                      </TableHead>
-                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        身份
-                      </TableHead>
-                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        元数据
-                      </TableHead>
-                      <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">
-                        操作
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {currentRows.length ? (
-                      currentRows.map((row) => {
-                        const isCurrentUser = row.user_id === session?.user.id;
-                        const emailConfirmed = Boolean(row.email_confirmed_at ?? row.confirmed_at);
-                        const phoneConfirmed = Boolean(row.phone_confirmed_at);
-                        const identitySummary = row.identities
-                          .map((identity) => identity.provider ?? "identity")
-                          .join(", ");
-
-                        return (
-                          <TableRow key={row.user_id}>
-                            <TableCell className="space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{row.email || "(无邮箱)"}</span>
-                                <Badge variant="outline" className="text-[11px]">
-                                  {row.role ?? row.aud ?? "user"}
-                                </Badge>
-                              </div>
-                              {row.aud && (
-                                <div className="text-[11px] text-muted-foreground">
-                                  受众: {row.aud}
-                                </div>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="font-mono text-xs text-muted-foreground">
-                                    {row.user_id.slice(0, 8)}...
-                                  </span>
-                                </TooltipTrigger>
-                                <TooltipContent className="text-xs">{row.user_id}</TooltipContent>
-                              </Tooltip>
-                            </TableCell>
-                            <TableCell className="text-sm">{formatTime(row.created_at)}</TableCell>
-                            <TableCell className="text-sm">{formatTime(row.user_created_at)}</TableCell>
-                            <TableCell className="text-sm">{formatTime(row.last_sign_in_at)}</TableCell>
-                            <TableCell>
-                              <div className="flex flex-col gap-1">
-                                <Badge
-                                  variant={emailConfirmed ? "secondary" : "outline"}
-                                  className="text-[11px]"
-                                >
-                                  邮箱 {emailConfirmed ? "已确认" : "待确认"}
-                                </Badge>
-                                {row.phone && (
-                                  <Badge
-                                    variant={phoneConfirmed ? "secondary" : "outline"}
-                                    className="text-[11px]"
-                                  >
-                                    电话 {phoneConfirmed ? "已确认" : "待确认"}
-                                  </Badge>
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      {table.getHeaderGroups().map((headerGroup) => (
+                        <TableRow key={headerGroup.id}>
+                          {headerGroup.headers.map((header) => (
+                            <TableHead key={header.id} className="text-xs uppercase tracking-wide text-muted-foreground">
+                              {header.isPlaceholder
+                                ? null
+                                : flexRender(
+                                  header.column.columnDef.header,
+                                  header.getContext()
                                 )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-sm">{row.phone ?? "-"}</TableCell>
-                            <TableCell>
-                              {row.identities.length ? (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Badge variant="outline" className="cursor-pointer text-[11px]">
-                                      {row.identities.length} 个身份
-                                    </Badge>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="text-xs leading-relaxed">
-                                    {identitySummary}
-                                  </TooltipContent>
-                                </Tooltip>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">无</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Dialog>
-                                <DialogTrigger asChild>
-                                  <Button variant="ghost" size="sm">
-                                    详情
-                                  </Button>
-                                </DialogTrigger>
-                                <DialogContent>
-                                  <DialogHeader>
-                                    <DialogTitle>
-                                      {row.email ?? row.user_id} 的元数据
-                                    </DialogTitle>
-                                    <DialogDescription>
-                                      完整的 Supabase 用户数据和关联身份信息。
-                                    </DialogDescription>
-                                  </DialogHeader>
-                                  <div className="space-y-4 text-xs">
-                                    <div>
-                                      <p className="text-[11px] font-semibold text-muted-foreground">
-                                        应用元数据
-                                      </p>
-                                      <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-border/70 bg-muted/40 p-3 font-mono text-[11px] text-muted-foreground">
-{metadataToJson(row.app_metadata)}
-                                      </pre>
-                                    </div>
-                                    <div>
-                                      <p className="text-[11px] font-semibold text-muted-foreground">
-                                        用户元数据
-                                      </p>
-                                      <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-border/70 bg-muted/40 p-3 font-mono text-[11px] text-muted-foreground">
-{metadataToJson(row.user_metadata)}
-                                      </pre>
-                                    </div>
-                                    <div>
-                                      <p className="text-[11px] font-semibold text-muted-foreground">
-                                        身份信息
-                                      </p>
-                                      {row.identities.length ? (
-                                        <div className="space-y-2 pt-2">
-                                          {row.identities.map((identity) => (
-                                            <div
-                                              key={identity.id}
-                                              className="rounded-md border border-border/70 bg-muted/40 p-2 text-[11px]"
-                                            >
-                                              <p className="font-semibold">
-                                                {identity.provider ?? "identity"}
-                                              </p>
-                                              <pre className="max-h-32 overflow-auto font-mono text-[11px] text-muted-foreground">
-{metadataToJson(identity.identity_data)}
-                                              </pre>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      ) : (
-                                        <p className="text-xs text-muted-foreground pt-2">
-                                          无关联身份信息。
-                                        </p>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <DialogFooter>
-                                    <DialogClose asChild>
-                                      <Button variant="outline" size="sm">
-                                        关闭
-                                      </Button>
-                                    </DialogClose>
-                                  </DialogFooter>
-                                </DialogContent>
-                              </Dialog>
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleRemove(row.user_id)}
-                                disabled={removeMutation.isPending || isCurrentUser}
-                                aria-label={
-                                  isCurrentUser
-                                    ? "无法移除自己的访问权限"
-                                    : "移除管理员用户"
-                                }
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableHeader>
+                    <TableBody>
+                      {table.getRowModel().rows?.length ? (
+                        table.getRowModel().rows.map((row) => (
+                          <TableRow
+                            key={row.id}
+                            data-state={row.getIsSelected() && "selected"}
+                          >
+                            {row.getVisibleCells().map((cell) => (
+                              <TableCell key={cell.id} className="align-top">
+                                {flexRender(
+                                  cell.column.columnDef.cell,
+                                  cell.getContext()
+                                )}
+                              </TableCell>
+                            ))}
                           </TableRow>
-                        );
-                      })
-                    ) : (
-                      <TableRow>
-                        <TableCell
-                          colSpan={columnCount}
-                          className="py-8 text-center text-muted-foreground"
-                        >
-                          未找到管理员用户
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={columns.length}
+                            className="h-24 text-center"
+                          >
+                            未找到管理员用户
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </TooltipProvider>
-              {filteredCount > rowsPerPage && (
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-                  <span>
-                    显示第 {startIndex}-{endIndex} 条，共 {filteredCount} 条
-                  </span>
-                  <Pagination>
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious
-                          href="#"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            setPage((prev) => Math.max(1, prev - 1));
-                          }}
-                          className={hasPrevPage ? "cursor-pointer" : "pointer-events-none opacity-50"}
-                        />
-                      </PaginationItem>
-                      <PaginationItem>
-                        <PaginationNext
-                          href="#"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            setPage((prev) => Math.min(totalPages, prev + 1));
-                          }}
-                          className={hasNextPage ? "cursor-pointer" : "pointer-events-none opacity-50"}
-                        />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
+
+              {/* Pagination */}
+              {filteredRows.length > 0 && (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    <span>
+                      第 {table.getState().pagination.pageIndex + 1} 页，共 {table.getPageCount()} 页 · 显示 {filteredRows.length} 个用户
+                    </span>
+                    <Select
+                      value={`${table.getState().pagination.pageSize}`}
+                      onValueChange={(value) => {
+                        table.setPageSize(Number(value));
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-[120px]">
+                        <SelectValue placeholder={table.getState().pagination.pageSize} />
+                      </SelectTrigger>
+                      <SelectContent side="top">
+                        {PAGE_SIZE_OPTIONS.map((pageSize) => (
+                          <SelectItem key={pageSize.value} value={pageSize.value}>
+                            {pageSize.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      onClick={() => table.setPageIndex(0)}
+                      disabled={!table.getCanPreviousPage()}
+                    >
+                      <span className="sr-only">Go to first page</span>
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      onClick={() => table.previousPage()}
+                      disabled={!table.getCanPreviousPage()}
+                    >
+                      <span className="sr-only">Go to previous page</span>
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      onClick={() => table.nextPage()}
+                      disabled={!table.getCanNextPage()}
+                    >
+                      <span className="sr-only">Go to next page</span>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+                      disabled={!table.getCanNextPage()}
+                    >
+                      <span className="sr-only">Go to last page</span>
+                      <ChevronsRight className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               )}
             </>

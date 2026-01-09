@@ -7,7 +7,6 @@ import {
   flexRender,
   createColumnHelper,
   type PaginationState,
-  type ColumnDef,
 } from "@tanstack/react-table";
 import { useAuth } from "../lib/auth";
 import { fetchSystemUsers, type SystemUserRow, type SystemUsersParams, type YoutubeAccountSummary } from "../lib/jobsApi";

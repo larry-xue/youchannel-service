@@ -1,5 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  createColumnHelper,
+  type PaginationState,
+} from "@tanstack/react-table";
 import { useAuth } from "../lib/auth";
 import { enqueueAnalysis, fetchAdminVideos, type AdminVideoRow, type AdminVideosParams } from "../lib/jobsApi";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -25,16 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-  PaginationEllipsis,
-} from "./ui/pagination";
-import { ChevronDown, ChevronUp, Eye, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye, Loader2, RefreshCw, Sparkles, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "所有状态" },
@@ -162,6 +160,8 @@ type DetailDialogData = {
   content: string;
 } | null;
 
+const columnHelper = createColumnHelper<AdminVideoRow>();
+
 export function Videos() {
   const { session } = useAuth();
   const token = session?.access_token;
@@ -179,21 +179,23 @@ export function Videos() {
   const [filters, setFilters] = useState<AdminVideosParams>({});
 
   // Pagination
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 20,
+  });
 
   // UI state
   const [actionError, setActionError] = useState<string | null>(null);
   const [detailDialog, setDetailDialog] = useState<DetailDialogData>(null);
 
   const videosQuery = useQuery({
-    queryKey: ["admin-videos", filters, page, pageSize],
+    queryKey: ["admin-videos", filters, pagination],
     enabled: Boolean(token),
     queryFn: () =>
       fetchAdminVideos(token ?? "", {
         ...filters,
-        limit: pageSize,
-        offset: (page - 1) * pageSize
+        limit: pagination.pageSize,
+        offset: pagination.pageIndex * pagination.pageSize
       })
   });
 
@@ -213,8 +215,18 @@ export function Videos() {
   });
 
   const rows = videosQuery.data?.rows ?? [];
-  const hasNextPage = rows.length === pageSize;
-  const totalPages = hasNextPage ? page + 1 : page;
+  // Since we don't have total count in this specific query response (unlike system_users),
+  // we estimate pageCount. If current page returned pageSize rows, we assume there is a next page.
+  // This "infinite scroll" like pagination logic is kept as is but adapted for table state.
+  // Actually, standard pagination usually needs a total count. 
+  // Looking at fetchAdminVideos return type in jobApi, let's see if it returns total.
+  // It returns { rows: AdminVideoRow[] }. No total.
+  // So we can only know if there's a next page if we got full page of results.
+
+  const hasNextPage = rows.length === pagination.pageSize;
+  // We can't know the true page count, so we'll set it to pageIndex + 2 if there's a next page, 
+  // or pageIndex + 1 if this is the last page.
+  const pageCount = hasNextPage ? pagination.pageIndex + 2 : pagination.pageIndex + 1;
 
   const handleApply = (event: React.FormEvent) => {
     event.preventDefault();
@@ -225,7 +237,7 @@ export function Videos() {
       status: formStatus === "all" ? undefined : formStatus,
       analysisStatus: formAnalysisStatus === "all" ? undefined : formAnalysisStatus
     });
-    setPage(1);
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   };
 
   const handleReset = () => {
@@ -235,45 +247,207 @@ export function Videos() {
     setFormStatus("all");
     setFormAnalysisStatus("all");
     setFilters({});
-    setPage(1);
-  };
-
-  const handlePageSizeChange = (value: string) => {
-    setPageSize(Number(value));
-    setPage(1);
-  };
-
-  // Generate page numbers for pagination
-  const getPageNumbers = () => {
-    const pages: (number | "ellipsis")[] = [];
-    const maxVisiblePages = 5;
-
-    if (totalPages <= maxVisiblePages) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
-    } else {
-      pages.push(1);
-      if (page > 3) {
-        pages.push("ellipsis");
-      }
-      const start = Math.max(2, page - 1);
-      const end = Math.min(totalPages - 1, page + 1);
-      for (let i = start; i <= end; i++) {
-        pages.push(i);
-      }
-      if (page < totalPages - 2) {
-        pages.push("ellipsis");
-      }
-      if (totalPages > 1) {
-        pages.push(totalPages);
-      }
-    }
-
-    return pages;
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   };
 
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
+
+  const columns = useMemo(
+    () => [
+      columnHelper.accessor("title", {
+        header: "视频",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="font-medium">
+              <div>
+                <TruncatedText text={row.title} maxLength={40} />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                YT: {row.youtube_video_id}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                时长: {row.duration ?? "-"}
+              </div>
+            </div>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "ids",
+        header: "ID",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="space-y-1">
+              <div className="text-xs">
+                <span className="text-muted-foreground">视频: </span>
+                <CopyableId id={row.id} />
+              </div>
+              <div className="text-xs">
+                <span className="text-muted-foreground">用户: </span>
+                <CopyableId id={row.user_id} />
+              </div>
+            </div>
+          );
+        },
+      }),
+      columnHelper.accessor("status", {
+        header: "状态",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div>
+              <Badge variant={getStatusBadgeVariant(row.status)} className="capitalize">
+                {translateStatus(row.status)}
+              </Badge>
+              {row.removed_at && (
+                <div className="mt-1 text-xs text-muted-foreground">
+                  已移除: {formatTime(row.removed_at)}
+                </div>
+              )}
+            </div>
+          );
+        },
+      }),
+      columnHelper.accessor("analysis_status", {
+        header: "分析",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div>
+              <Badge variant={getAnalysisBadgeVariant(row.analysis_status)}>
+                {translateAnalysisStatus(row.analysis_status)}
+              </Badge>
+              <div className="mt-1 text-xs text-muted-foreground">
+                共 {row.analysis_count} 次
+              </div>
+              {row.analysis_model && (
+                <div className="text-xs text-muted-foreground">
+                  {row.analysis_model}
+                </div>
+              )}
+            </div>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "timestamps",
+        header: "时间戳",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <div>创建: {formatTime(row.created_at)}</div>
+              {row.analysis_created_at && (
+                <div>分析: {formatTime(row.analysis_created_at)}</div>
+              )}
+            </div>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "details",
+        header: "详情",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="flex flex-wrap gap-1">
+              {row.analysis_text && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2"
+                  onClick={() =>
+                    setDetailDialog({
+                      title: "分析结果",
+                      content: row.analysis_text ?? ""
+                    })
+                  }
+                >
+                  <Eye className="mr-1 h-3 w-3" />
+                  文本
+                </Button>
+              )}
+              {row.analysis_error && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-destructive"
+                  onClick={() =>
+                    setDetailDialog({
+                      title: "分析错误",
+                      content: row.analysis_error ?? ""
+                    })
+                  }
+                >
+                  <Eye className="mr-1 h-3 w-3" />
+                  错误
+                </Button>
+              )}
+            </div>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "actions",
+        header: "操作",
+        cell: (info) => {
+          const row = info.row.original;
+          const analysisStatus = row.analysis_status ?? "";
+          const isLocked = analysisStatus === "queued" || analysisStatus === "processing";
+          const canAnalyze = row.status === "active" && !isLocked;
+          const isPending = analyzeMutation.isPending && analyzeMutation.variables?.id === row.id;
+
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={!canAnalyze ? 0 : undefined}>
+                  <Button
+                    size="sm"
+                    onClick={() => analyzeMutation.mutate(row)}
+                    disabled={!canAnalyze || isPending}
+                  >
+                    {isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        排队中...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4" />
+                        {row.analysis_status ? "重新运行" : "分析"}
+                      </>
+                    )}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {canAnalyze
+                  ? "排队分析"
+                  : isLocked
+                    ? "分析已排队或正在处理中"
+                    : "只有活跃的视频才能被分析"}
+              </TooltipContent>
+            </Tooltip>
+          );
+        },
+      }),
+    ],
+    [analyzeMutation.isPending, analyzeMutation.variables?.id]
+  );
+
+  const table = useReactTable({
+    data: rows,
+    columns,
+    pageCount, // manual page count
+    state: {
+      pagination,
+    },
+    onPaginationChange: setPagination,
+    getCoreRowModel: getCoreRowModel(),
+    manualPagination: true,
+  });
 
   return (
     <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
@@ -409,184 +583,44 @@ export function Videos() {
           </Alert>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-md border">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[200px] text-xs uppercase tracking-wide text-muted-foreground">
-                      视频
-                    </TableHead>
-                    <TableHead className="min-w-[140px] text-xs uppercase tracking-wide text-muted-foreground">
-                      ID
-                    </TableHead>
-                    <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      状态
-                    </TableHead>
-                    <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      分析
-                    </TableHead>
-                    <TableHead className="min-w-[140px] text-xs uppercase tracking-wide text-muted-foreground">
-                      时间戳
-                    </TableHead>
-                    <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      详情
-                    </TableHead>
-                    <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      操作
-                    </TableHead>
-                  </TableRow>
+                  {table.getHeaderGroups().map((headerGroup) => (
+                    <TableRow key={headerGroup.id}>
+                      {headerGroup.headers.map((header) => (
+                        <TableHead key={header.id} className="text-xs uppercase tracking-wide text-muted-foreground">
+                          {header.isPlaceholder
+                            ? null
+                            : flexRender(
+                              header.column.columnDef.header,
+                              header.getContext()
+                            )}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  ))}
                 </TableHeader>
                 <TableBody>
-                  {rows.length ? (
-                    rows.map((row) => {
-                      const analysisStatus = row.analysis_status ?? "";
-                      const isLocked = analysisStatus === "queued" || analysisStatus === "processing";
-                      const canAnalyze = row.status === "active" && !isLocked;
-                      const isPending = analyzeMutation.isPending && analyzeMutation.variables?.id === row.id;
-
-                      return (
-                        <TableRow key={row.id}>
-                          {/* Video Info */}
-                          <TableCell className="align-top">
-                            <div className="font-medium">
-                              <TruncatedText text={row.title} maxLength={40} />
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              YT: {row.youtube_video_id}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              时长: {row.duration ?? "-"}
-                            </div>
-                          </TableCell>
-
-                          {/* IDs */}
-                          <TableCell className="align-top">
-                            <div className="space-y-1">
-                              <div className="text-xs">
-                                <span className="text-muted-foreground">视频: </span>
-                                <CopyableId id={row.id} />
-                              </div>
-                              <div className="text-xs">
-                                <span className="text-muted-foreground">用户: </span>
-                                <CopyableId id={row.user_id} />
-                              </div>
-                            </div>
-                          </TableCell>
-
-                          {/* Status */}
-                          <TableCell className="align-top">
-                            <Badge variant={getStatusBadgeVariant(row.status)} className="capitalize">
-                              {translateStatus(row.status)}
-                            </Badge>
-                            {row.removed_at && (
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                已移除: {formatTime(row.removed_at)}
-                              </div>
+                  {table.getRowModel().rows?.length ? (
+                    table.getRowModel().rows.map((row) => (
+                      <TableRow
+                        key={row.id}
+                        data-state={row.getIsSelected() && "selected"}
+                      >
+                        {row.getVisibleCells().map((cell) => (
+                          <TableCell key={cell.id} className="align-top">
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
                             )}
                           </TableCell>
-
-                          {/* Analysis Status */}
-                          <TableCell className="align-top">
-                            <Badge variant={getAnalysisBadgeVariant(row.analysis_status)}>
-                              {translateAnalysisStatus(row.analysis_status)}
-                            </Badge>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              共 {row.analysis_count} 次
-                            </div>
-                            {row.analysis_model && (
-                              <div className="text-xs text-muted-foreground">
-                                {row.analysis_model}
-                              </div>
-                            )}
-                          </TableCell>
-
-                          {/* Timestamps */}
-                          <TableCell className="align-top">
-                          <div className="space-y-1 text-xs text-muted-foreground">
-                            <div>创建: {formatTime(row.created_at)}</div>
-                            {row.analysis_created_at && (
-                              <div>分析: {formatTime(row.analysis_created_at)}</div>
-                            )}
-                          </div>
-                          </TableCell>
-
-                          {/* Detail Buttons */}
-                          <TableCell className="align-top">
-                            <div className="flex flex-wrap gap-1">
-                              {row.analysis_text && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2"
-                                  onClick={() =>
-                                    setDetailDialog({
-                                      title: "分析结果",
-                                      content: row.analysis_text ?? ""
-                                    })
-                                  }
-                                >
-                                  <Eye className="mr-1 h-3 w-3" />
-                                  文本
-                                </Button>
-                              )}
-                              {row.analysis_error && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2 text-destructive"
-                                  onClick={() =>
-                                    setDetailDialog({
-                                      title: "分析错误",
-                                      content: row.analysis_error ?? ""
-                                    })
-                                  }
-                                >
-                                  <Eye className="mr-1 h-3 w-3" />
-                                  错误
-                                </Button>
-                              )}
-                            </div>
-                          </TableCell>
-
-                          {/* Action */}
-                          <TableCell className="align-top">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span tabIndex={!canAnalyze ? 0 : undefined}>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => analyzeMutation.mutate(row)}
-                                    disabled={!canAnalyze || isPending}
-                                  >
-                                    {isPending ? (
-                                      <>
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                        排队中...
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Sparkles className="h-4 w-4" />
-                                        {row.analysis_status ? "重新运行" : "分析"}
-                                      </>
-                                    )}
-                                  </Button>
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                {canAnalyze
-                                  ? "排队分析"
-                                  : isLocked
-                                    ? "分析已排队或正在处理中"
-                                    : "只有活跃的视频才能被分析"}
-                              </TooltipContent>
-                            </Tooltip>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
+                        ))}
+                      </TableRow>
+                    ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                      <TableCell colSpan={columns.length} className="py-8 text-center text-muted-foreground">
                         当前筛选条件下未找到视频。
                       </TableCell>
                     </TableRow>
@@ -600,57 +634,47 @@ export function Videos() {
               <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-4 text-sm text-muted-foreground">
                   <span>
-                    第 {page} 页 · 显示 {rows.length} 个视频
+                    第 {table.getState().pagination.pageIndex + 1} 页 · 显示 {rows.length} 个视频
                   </span>
-                  <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+                  <Select
+                    value={`${table.getState().pagination.pageSize}`}
+                    onValueChange={(value) => {
+                      table.setPageSize(Number(value));
+                    }}
+                  >
                     <SelectTrigger className="h-8 w-[120px]">
-                      <SelectValue />
+                      <SelectValue placeholder={table.getState().pagination.pageSize} />
                     </SelectTrigger>
-                    <SelectContent>
-                      {PAGE_SIZE_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
+                    <SelectContent side="top">
+                      {PAGE_SIZE_OPTIONS.map((pageSize) => (
+                        <SelectItem key={pageSize.value} value={pageSize.value}>
+                          {pageSize.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
 
-                <Pagination>
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious
-                        onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                        className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                      />
-                    </PaginationItem>
-
-                    {getPageNumbers().map((pageNum, index) =>
-                      pageNum === "ellipsis" ? (
-                        <PaginationItem key={`ellipsis-${index}`}>
-                          <PaginationEllipsis />
-                        </PaginationItem>
-                      ) : (
-                        <PaginationItem key={pageNum}>
-                          <PaginationLink
-                            onClick={() => setPage(pageNum)}
-                            isActive={page === pageNum}
-                            className="cursor-pointer"
-                          >
-                            {pageNum}
-                          </PaginationLink>
-                        </PaginationItem>
-                      )
-                    )}
-
-                    <PaginationItem>
-                      <PaginationNext
-                        onClick={() => setPage((prev) => prev + 1)}
-                        className={!hasNextPage ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                      />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="outline"
+                    className="h-8 w-8 p-0"
+                    onClick={() => table.previousPage()}
+                    disabled={!table.getCanPreviousPage()}
+                  >
+                    <span className="sr-only">Go to previous page</span>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-8 w-8 p-0"
+                    onClick={() => table.nextPage()}
+                    disabled={!hasNextPage}
+                  >
+                    <span className="sr-only">Go to next page</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             )}
           </>
