@@ -9,7 +9,7 @@ function RootLayout() {
         <div className="absolute -top-32 right-0 h-72 w-72 rounded-full bg-primary/20 blur-3xl motion-safe:animate-[float_8s_ease-in-out_infinite]" />
         <div className="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-accent/20 blur-3xl motion-safe:animate-[float_10s_ease-in-out_infinite]" />
       </div>
-      <main className="w-full max-w-full px-6 py-8 sm:px-8 lg:px-12 motion-safe:animate-[page-in_0.6s_ease-out]">
+      <main className="w-full max-w-full motion-safe:animate-[page-in_0.6s_ease-out]">
         <Outlet />
       </main>
     </div>

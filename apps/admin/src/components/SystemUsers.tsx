@@ -1,6 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "@tanstack/react-router";
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  createColumnHelper,
+  type PaginationState,
+  type ColumnDef,
+} from "@tanstack/react-table";
 import { useAuth } from "../lib/auth";
 import { fetchSystemUsers, type SystemUserRow, type SystemUsersParams, type YoutubeAccountSummary } from "../lib/jobsApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -26,16 +34,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-  PaginationEllipsis,
-} from "./ui/pagination";
-import { ChevronDown, ChevronUp, Eye, RefreshCw, Coins } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye, RefreshCw, Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 
 const PAGE_SIZE_OPTIONS = [
   { value: "10", label: "每页 10 条" },
@@ -164,6 +163,8 @@ function MetadataCell({ data, title }: { data: Record<string, unknown> | null; t
   );
 }
 
+const columnHelper = createColumnHelper<SystemUserRow>();
+
 export function SystemUsers() {
   const { session } = useAuth();
   const token = session?.access_token;
@@ -175,76 +176,226 @@ export function SystemUsers() {
   // Applied filters
   const [filters, setFilters] = useState<SystemUsersParams>({});
 
-  // Pagination
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  // Pagination state
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 20,
+  });
 
   const usersQuery = useQuery({
-    queryKey: ["system-users", filters, page, pageSize],
+    queryKey: ["system-users", filters, pagination],
     enabled: Boolean(token),
     queryFn: () =>
       fetchSystemUsers(token ?? "", {
         ...filters,
-        limit: pageSize,
-        offset: (page - 1) * pageSize
+        limit: pagination.pageSize,
+        offset: pagination.pageIndex * pagination.pageSize
       })
   });
 
   const rows: SystemUserRow[] = usersQuery.data?.rows ?? [];
   const total = usersQuery.data?.total ?? 0;
+  const pageCount = Math.ceil(total / pagination.pageSize);
   const accountCount = rows.reduce((acc, row) => acc + row.youtube_accounts.length, 0);
-  const totalPages = Math.ceil(total / pageSize) || 1;
+
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+
+  const columns = useMemo(
+    () => [
+      columnHelper.accessor("email", {
+        header: "用户信息",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="font-medium">
+              <div>{row.email || "(无邮箱)"}</div>
+              {row.phone && (
+                <div className="text-xs text-muted-foreground">
+                  电话: {row.phone}
+                </div>
+              )}
+              <div className="mt-1 flex items-center gap-1">
+                {row.is_anonymous && (
+                  <Badge variant="outline" className="text-xs">
+                    匿名
+                  </Badge>
+                )}
+              </div>
+            </div>
+          );
+        },
+      }),
+      columnHelper.accessor("id", {
+        header: "用户 ID",
+        cell: (info) => <CopyableId id={info.getValue()} label="User ID" />,
+      }),
+      columnHelper.display({
+        id: "role_aud",
+        header: "角色 / 受众",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="space-y-1 text-xs">
+              <div>
+                <span className="text-muted-foreground">角色: </span>
+                {row.role ?? "-"}
+              </div>
+              <div>
+                <span className="text-muted-foreground">受众: </span>
+                {row.aud ?? "-"}
+              </div>
+            </div>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "confirmation",
+        header: "确认状态",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="space-y-1 text-xs">
+              <div className="flex items-center gap-1">
+                <span className="text-muted-foreground">邮箱: </span>
+                {row.email_confirmed_at ? (
+                  <Badge variant="secondary" className="text-xs">
+                    已确认
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-xs">
+                    未确认
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-muted-foreground">电话: </span>
+                {row.phone_confirmed_at ? (
+                  <Badge variant="secondary" className="text-xs">
+                    已确认
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-xs">
+                    -
+                  </Badge>
+                )}
+              </div>
+            </div>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "timestamps",
+        header: "时间戳",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <div>创建: {formatTime(row.created_at)}</div>
+              <div>确认: {formatTime(row.confirmed_at)}</div>
+              <div>最后登录: {formatTime(row.last_sign_in_at)}</div>
+            </div>
+          );
+        },
+      }),
+      columnHelper.accessor("quota", {
+        header: "配额",
+        cell: (info) => {
+          const quota = info.getValue();
+          if (!quota) return <span className="text-xs text-muted-foreground">无配额</span>;
+
+          const videoTotal = quota.video_seconds_total ?? 0;
+          const videoRemaining = quota.video_seconds_remaining ?? 0;
+          const videoUsed = Math.max(0, videoTotal - videoRemaining);
+          const videoPercent =
+            videoTotal > 0 ? Math.min(100, (videoUsed / videoTotal) * 100) : 0;
+          const chatTotal = quota.chat_seconds_total ?? 0;
+          const chatRemaining = quota.chat_seconds_remaining ?? 0;
+          const chatUsed = Math.max(0, chatTotal - chatRemaining);
+
+          return (
+            <div className="space-y-1">
+              <div className="font-medium text-sm">
+                视频: {formatSeconds(videoUsed)} / {formatSeconds(videoTotal)}
+              </div>
+              <div className="w-full bg-muted rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all ${videoPercent >= 100
+                    ? "bg-destructive"
+                    : videoPercent >= 80
+                      ? "bg-yellow-500"
+                      : "bg-primary"
+                    }`}
+                  style={{ width: `${videoPercent}%` }}
+                />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {formatSeconds(videoRemaining)} 剩余 - 最大{" "}
+                {formatSeconds(quota.max_video_seconds)}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                聊天: {formatSeconds(chatUsed)} / {formatSeconds(chatTotal)}
+              </div>
+            </div>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "metadata",
+        header: "元数据",
+        cell: (info) => {
+          const row = info.row.original;
+          return (
+            <div className="flex flex-col gap-1">
+              <MetadataCell data={row.app_metadata} title="应用元数据" />
+              <MetadataCell data={row.user_metadata} title="用户元数据" />
+            </div>
+          );
+        },
+      }),
+      columnHelper.accessor("youtube_accounts", {
+        header: "YouTube 账户",
+        cell: (info) => <AccountsCell accounts={info.getValue()} />,
+      }),
+      columnHelper.display({
+        id: "actions",
+        header: "操作",
+        cell: (info) => (
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/quotas" search={{ userId: info.row.original.id }}>
+              <Coins className="h-4 w-4" />
+            </Link>
+          </Button>
+        ),
+      }),
+    ],
+    []
+  );
+
+  const table = useReactTable({
+    data: rows,
+    columns,
+    pageCount,
+    state: {
+      pagination,
+    },
+    onPaginationChange: setPagination,
+    getCoreRowModel: getCoreRowModel(),
+    manualPagination: true,
+  });
 
   const handleApply = (event: React.FormEvent) => {
     event.preventDefault();
     setFilters({
       email: formEmail.trim() || undefined
     });
-    setPage(1);
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   };
 
   const handleReset = () => {
     setFormEmail("");
     setFilters({});
-    setPage(1);
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   };
-
-  const handlePageSizeChange = (value: string) => {
-    setPageSize(Number(value));
-    setPage(1);
-  };
-
-  // Generate page numbers for pagination
-  const getPageNumbers = () => {
-    const pages: (number | "ellipsis")[] = [];
-    const maxVisiblePages = 5;
-
-    if (totalPages <= maxVisiblePages) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
-    } else {
-      pages.push(1);
-      if (page > 3) {
-        pages.push("ellipsis");
-      }
-      const start = Math.max(2, page - 1);
-      const end = Math.min(totalPages - 1, page + 1);
-      for (let i = start; i <= end; i++) {
-        pages.push(i);
-      }
-      if (page < totalPages - 2) {
-        pages.push("ellipsis");
-      }
-      if (totalPages > 1) {
-        pages.push(totalPages);
-      }
-    }
-
-    return pages;
-  };
-
-  const activeFilterCount = Object.values(filters).filter(Boolean).length;
 
   return (
     <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
@@ -325,191 +476,48 @@ export function SystemUsers() {
           </Alert>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-md border">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[180px] text-xs uppercase tracking-wide text-muted-foreground">
-                      用户信息
-                    </TableHead>
-                    <TableHead className="min-w-[120px] text-xs uppercase tracking-wide text-muted-foreground">
-                      用户 ID
-                    </TableHead>
-                    <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      角色 / 受众
-                    </TableHead>
-                    <TableHead className="min-w-[140px] text-xs uppercase tracking-wide text-muted-foreground">
-                      确认状态
-                    </TableHead>
-                    <TableHead className="min-w-[180px] text-xs uppercase tracking-wide text-muted-foreground">
-                      时间戳
-                    </TableHead>
-                    <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      配额
-                    </TableHead>
-                    <TableHead className="min-w-[100px] text-xs uppercase tracking-wide text-muted-foreground">
-                      元数据
-                    </TableHead>
-                    <TableHead className="min-w-[240px] text-xs uppercase tracking-wide text-muted-foreground">
-                      YouTube 账户
-                    </TableHead>
-                    <TableHead className="min-w-[80px] text-xs uppercase tracking-wide text-muted-foreground">
-                      操作
-                    </TableHead>
-                  </TableRow>
+                  {table.getHeaderGroups().map((headerGroup) => (
+                    <TableRow key={headerGroup.id}>
+                      {headerGroup.headers.map((header) => (
+                        <TableHead key={header.id} className="text-xs uppercase tracking-wide text-muted-foreground">
+                          {header.isPlaceholder
+                            ? null
+                            : flexRender(
+                              header.column.columnDef.header,
+                              header.getContext()
+                            )}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  ))}
                 </TableHeader>
                 <TableBody>
-                  {rows.length ? (
-                    rows.map((row) => (
-                      <TableRow key={row.id}>
-                        {/* User Info */}
-                        <TableCell className="align-top">
-                          <div className="font-medium">
-                            {row.email || "(无邮箱)"}
-                          </div>
-                          {row.phone && (
-                            <div className="text-xs text-muted-foreground">
-                              电话: {row.phone}
-                            </div>
-                          )}
-                          <div className="mt-1 flex items-center gap-1">
-                            {row.is_anonymous && (
-                              <Badge variant="outline" className="text-xs">
-                                匿名
-                              </Badge>
+                  {table.getRowModel().rows?.length ? (
+                    table.getRowModel().rows.map((row) => (
+                      <TableRow
+                        key={row.id}
+                        data-state={row.getIsSelected() && "selected"}
+                      >
+                        {row.getVisibleCells().map((cell) => (
+                          <TableCell key={cell.id} className="align-top">
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
                             )}
-                          </div>
-                        </TableCell>
-
-                        {/* User ID */}
-                        <TableCell className="align-top">
-                          <CopyableId id={row.id} label="User ID" />
-                        </TableCell>
-
-                        {/* Role / Aud */}
-                        <TableCell className="align-top">
-                          <div className="space-y-1 text-xs">
-                            <div>
-                              <span className="text-muted-foreground">角色: </span>
-                              {row.role ?? "-"}
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">受众: </span>
-                              {row.aud ?? "-"}
-                            </div>
-                          </div>
-                        </TableCell>
-
-                        {/* Confirmation */}
-                        <TableCell className="align-top">
-                          <div className="space-y-1 text-xs">
-                            <div className="flex items-center gap-1">
-                              <span className="text-muted-foreground">邮箱: </span>
-                              {row.email_confirmed_at ? (
-                                <Badge variant="secondary" className="text-xs">
-                                  已确认
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="text-xs">
-                                  未确认
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-muted-foreground">电话: </span>
-                              {row.phone_confirmed_at ? (
-                                <Badge variant="secondary" className="text-xs">
-                                  已确认
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="text-xs">
-                                  -
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-
-                        {/* Timestamps */}
-                        <TableCell className="align-top">
-                          <div className="space-y-1 text-xs text-muted-foreground">
-                            <div>创建: {formatTime(row.created_at)}</div>
-                            <div>确认: {formatTime(row.confirmed_at)}</div>
-                            <div>最后登录: {formatTime(row.last_sign_in_at)}</div>
-                          </div>
-                        </TableCell>
-
-                        {/* Quota */}
-                        <TableCell className="align-top">
-                          {row.quota ? (
-                            (() => {
-                              const videoTotal = row.quota.video_seconds_total ?? 0;
-                              const videoRemaining = row.quota.video_seconds_remaining ?? 0;
-                              const videoUsed = Math.max(0, videoTotal - videoRemaining);
-                              const videoPercent =
-                                videoTotal > 0 ? Math.min(100, (videoUsed / videoTotal) * 100) : 0;
-                              const chatTotal = row.quota.chat_seconds_total ?? 0;
-                              const chatRemaining = row.quota.chat_seconds_remaining ?? 0;
-                              const chatUsed = Math.max(0, chatTotal - chatRemaining);
-
-                              return (
-                                <div className="space-y-1">
-                                  <div className="font-medium text-sm">
-                                    视频: {formatSeconds(videoUsed)} / {formatSeconds(videoTotal)}
-                                  </div>
-                                  <div className="w-full bg-muted rounded-full h-2">
-                                    <div
-                                      className={`h-2 rounded-full transition-all ${videoPercent >= 100
-                                          ? "bg-destructive"
-                                          : videoPercent >= 80
-                                            ? "bg-yellow-500"
-                                            : "bg-primary"
-                                        }`}
-                                      style={{ width: `${videoPercent}%` }}
-                                    />
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {formatSeconds(videoRemaining)} 剩余 - 最大{" "}
-                                    {formatSeconds(row.quota.max_video_seconds)}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    聊天: {formatSeconds(chatUsed)} / {formatSeconds(chatTotal)}
-                                  </div>
-                                </div>
-                              );
-                            })()
-                          ) : (
-                            <span className="text-xs text-muted-foreground">无配额</span>
-                          )}
-                        </TableCell>
-
-                        {/* Metadata */}
-                        <TableCell className="align-top">
-                          <div className="flex flex-col gap-1">
-                            <MetadataCell data={row.app_metadata} title="应用元数据" />
-                            <MetadataCell data={row.user_metadata} title="用户元数据" />
-                          </div>
-                        </TableCell>
-
-                        {/* YouTube Accounts */}
-                        <TableCell className="align-top">
-                          <AccountsCell accounts={row.youtube_accounts} />
-                        </TableCell>
-
-                        {/* Actions */}
-                        <TableCell className="align-top">
-                          <Button asChild variant="ghost" size="sm">
-                            <Link to="/quotas" search={{ userId: row.id }}>
-                              <Coins className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        </TableCell>
+                          </TableCell>
+                        ))}
                       </TableRow>
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                        未找到用户
+                      <TableCell
+                        colSpan={columns.length}
+                        className="h-24 text-center"
+                      >
+                        未找到结果
                       </TableCell>
                     </TableRow>
                   )}
@@ -518,63 +526,69 @@ export function SystemUsers() {
             </div>
 
             {/* Pagination */}
-            {rows.length > 0 && (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <span>
-                    第 {page} 页，共 {totalPages} 页 · 显示 {rows.length} / {total} 个用户
-                  </span>
-                  <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
-                    <SelectTrigger className="h-8 w-[120px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PAGE_SIZE_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <Pagination>
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious
-                        onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                        className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                      />
-                    </PaginationItem>
-
-                    {getPageNumbers().map((pageNum, index) =>
-                      pageNum === "ellipsis" ? (
-                        <PaginationItem key={`ellipsis-${index}`}>
-                          <PaginationEllipsis />
-                        </PaginationItem>
-                      ) : (
-                        <PaginationItem key={pageNum}>
-                          <PaginationLink
-                            onClick={() => setPage(pageNum)}
-                            isActive={page === pageNum}
-                            className="cursor-pointer"
-                          >
-                            {pageNum}
-                          </PaginationLink>
-                        </PaginationItem>
-                      )
-                    )}
-
-                    <PaginationItem>
-                      <PaginationNext
-                        onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                        className={page >= totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                      />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <span>
+                  第 {table.getState().pagination.pageIndex + 1} 页，共 {table.getPageCount()} 页 · 显示 {rows.length} / {total} 个用户
+                </span>
+                <Select
+                  value={`${table.getState().pagination.pageSize}`}
+                  onValueChange={(value) => {
+                    table.setPageSize(Number(value));
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[120px]">
+                    <SelectValue placeholder={table.getState().pagination.pageSize} />
+                  </SelectTrigger>
+                  <SelectContent side="top">
+                    {PAGE_SIZE_OPTIONS.map((pageSize) => (
+                      <SelectItem key={pageSize.value} value={pageSize.value}>
+                        {pageSize.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            )}
+
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  className="h-8 w-8 p-0"
+                  onClick={() => table.setPageIndex(0)}
+                  disabled={!table.getCanPreviousPage()}
+                >
+                  <span className="sr-only">Go to first page</span>
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 w-8 p-0"
+                  onClick={() => table.previousPage()}
+                  disabled={!table.getCanPreviousPage()}
+                >
+                  <span className="sr-only">Go to previous page</span>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 w-8 p-0"
+                  onClick={() => table.nextPage()}
+                  disabled={!table.getCanNextPage()}
+                >
+                  <span className="sr-only">Go to next page</span>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-8 w-8 p-0"
+                  onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+                  disabled={!table.getCanNextPage()}
+                >
+                  <span className="sr-only">Go to last page</span>
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </>
         )}
       </CardContent>
