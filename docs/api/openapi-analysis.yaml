@@ -1,0 +1,294 @@
+openapi: 3.0.3
+info:
+  title: YouChannel OpenAPI - Analysis
+  description: |
+    Video analysis API for YouChannel service.
+    
+    ## Authentication
+    All requests require authentication via shared key. The key can be provided in one of the following ways:
+    - Header: `x-openapi-key: <key>`
+    - Header: `x-api-key: <key>`
+    - Header: `x-service-key: <key>`
+    - Header: `Authorization: Bearer <key>`
+  version: 1.0.0
+  contact:
+    name: YouChannel API Support
+
+servers:
+  - url: http://localhost:4000
+    description: Local development server
+  - url: https://your-production-domain.com
+    description: Production server
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+paths:
+  /openapi/analysis:
+    post:
+      summary: Trigger Video Analysis
+      description: |
+        Submit videos for analysis. The API will:
+        1. Insert new videos into the database (skip existing ones)
+        2. Check quota limits for each video
+        3. Enqueue valid videos for AI analysis
+        
+        **Notes:**
+        - Duplicate `youtubeVideoId` values in the request will be deduplicated
+        - Videos that already exist in the database will be skipped
+        - Videos exceeding the user's `max_video_seconds` quota limit will be skipped
+      operationId: triggerAnalysis
+      tags:
+        - Analysis
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalysisRequest'
+            examples:
+              singleVideo:
+                summary: Single video analysis
+                value:
+                  userId: "550e8400-e29b-41d4-a716-446655440000"
+                  videos:
+                    - youtubeVideoId: "dQw4w9WgXcQ"
+                      title: "Sample Video Title"
+                      description: "This is a sample video description."
+                      thumbnailUrl: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"
+                      publishedAt: "2024-01-15T10:30:00Z"
+                      duration: "PT3M45S"
+                      url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                      raw: null
+              multipleVideos:
+                summary: Multiple videos analysis
+                value:
+                  userId: "550e8400-e29b-41d4-a716-446655440000"
+                  videos:
+                    - youtubeVideoId: "video1"
+                      title: "First Video"
+                      description: "Description for first video"
+                      thumbnailUrl: "https://i.ytimg.com/vi/video1/hqdefault.jpg"
+                      publishedAt: "2024-01-15T10:30:00Z"
+                      duration: "PT10M30S"
+                      url: "https://www.youtube.com/watch?v=video1"
+                      raw:
+                        channelId: "UCxxxxxx"
+                        channelTitle: "Sample Channel"
+                    - youtubeVideoId: "video2"
+                      title: "Second Video"
+                      description: "Description for second video"
+                      thumbnailUrl: "https://i.ytimg.com/vi/video2/hqdefault.jpg"
+                      publishedAt: "2024-01-16T14:00:00Z"
+                      duration: "PT5M15S"
+                      url: "https://www.youtube.com/watch?v=video2"
+                      raw: null
+      responses:
+        '200':
+          description: Analysis request processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResponse'
+              examples:
+                success:
+                  summary: Successful analysis request
+                  value:
+                    userId: "550e8400-e29b-41d4-a716-446655440000"
+                    requestedCount: 5
+                    uniqueCount: 4
+                    insertedCount: 3
+                    existingCount: 1
+                    enqueued: 2
+                    skipped: 1
+                    skipReasons:
+                      duration_exceeded: 1
+        '400':
+          description: Bad request - missing or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingUser:
+                  summary: Missing user ID
+                  value:
+                    error: "missing_user"
+                missingVideos:
+                  summary: Missing videos array
+                  value:
+                    error: "missing_videos"
+                invalidVideos:
+                  summary: Invalid video data format
+                  value:
+                    error: "invalid_videos"
+        '401':
+          description: Unauthorized - missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "unauthorized"
+        '503':
+          description: Service unavailable - API key not configured on server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "service_unavailable"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-openapi-key
+      description: API key for authentication (also accepts x-api-key or x-service-key headers)
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token authentication (use the shared API key as the token)
+
+  schemas:
+    AnalysisRequest:
+      type: object
+      required:
+        - userId
+        - videos
+      properties:
+        userId:
+          type: string
+          format: uuid
+          description: The UUID of the user who owns these videos
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        videos:
+          type: array
+          minItems: 1
+          description: Array of videos to analyze
+          items:
+            $ref: '#/components/schemas/VideoInput'
+
+    VideoInput:
+      type: object
+      required:
+        - youtubeVideoId
+        - title
+        - description
+        - thumbnailUrl
+        - publishedAt
+        - duration
+        - url
+      properties:
+        youtubeVideoId:
+          type: string
+          description: YouTube video ID (the part after `v=` in YouTube URLs)
+          example: "dQw4w9WgXcQ"
+        title:
+          type: string
+          description: Video title (non-empty string required)
+          example: "Sample Video Title"
+        description:
+          type: string
+          description: Video description (non-empty string required)
+          example: "This is a sample video description."
+        thumbnailUrl:
+          type: string
+          format: uri
+          description: URL to the video thumbnail image
+          example: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"
+        publishedAt:
+          type: string
+          format: date-time
+          description: Video publish timestamp in ISO 8601 format
+          example: "2024-01-15T10:30:00Z"
+        duration:
+          type: string
+          pattern: '^PT(\d+H)?(\d+M)?(\d+S)?$'
+          description: |
+            Video duration in ISO 8601 duration format (e.g., `PT3M45S` for 3 minutes 45 seconds).
+            Must be greater than 0 seconds.
+          example: "PT3M45S"
+        url:
+          type: string
+          format: uri
+          description: Full YouTube video URL
+          example: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        raw:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Optional raw metadata from YouTube API (can be null or an object)
+          example:
+            channelId: "UCxxxxxx"
+            channelTitle: "Sample Channel"
+
+    AnalysisResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+          description: The user ID from the request
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        requestedCount:
+          type: integer
+          minimum: 0
+          description: Total number of videos in the original request
+          example: 5
+        uniqueCount:
+          type: integer
+          minimum: 0
+          description: Number of unique videos after deduplication by youtubeVideoId
+          example: 4
+        insertedCount:
+          type: integer
+          minimum: 0
+          description: Number of new videos inserted into the database
+          example: 3
+        existingCount:
+          type: integer
+          minimum: 0
+          description: Number of videos that already existed in the database (skipped insert)
+          example: 1
+        enqueued:
+          type: integer
+          minimum: 0
+          description: Number of videos successfully enqueued for analysis
+          example: 2
+        skipped:
+          type: integer
+          minimum: 0
+          description: Number of videos skipped from analysis queue
+          example: 1
+        skipReasons:
+          type: object
+          additionalProperties:
+            type: integer
+          description: |
+            Breakdown of skip reasons and their counts. Possible reasons:
+            - `duration_exceeded`: Video duration exceeds user's max_video_seconds quota
+            - `already_queued`: Video analysis is already queued or processing
+            - `already_completed`: Video analysis is already completed
+          example:
+            duration_exceeded: 1
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error code describing the failure
+          enum:
+            - missing_user
+            - missing_videos
+            - invalid_videos
+            - unauthorized
+            - service_unavailable
+          example: "missing_user"
+
+tags:
+  - name: Analysis
+    description: Video analysis operations
