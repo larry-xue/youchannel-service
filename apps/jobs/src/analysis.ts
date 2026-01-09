@@ -186,14 +186,18 @@ export async function enqueueAnalyses(params: {
          usage,
          status,
          error,
-         skip_reason
-       ) values ($1, $2, $3, $4, $5, $6, $7, $8)
+         skip_reason,
+         claimed_at,
+         claimed_by
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL)
        on conflict (video_id)
        do update set
          user_id = excluded.user_id,
          status = excluded.status,
          error = null,
-         skip_reason = null
+         skip_reason = null,
+         claimed_at = NULL,
+         claimed_by = NULL
        where video_analyses.status <> 'queued'
          and video_analyses.status <> 'processing'
        returning id`,

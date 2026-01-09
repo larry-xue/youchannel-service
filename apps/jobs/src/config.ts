@@ -12,7 +12,12 @@ const envSchema = z.object({
   GEMINI_MODEL: z.string().min(1).optional(),
   LOG_LEVEL: z.string().default("info"),
   SENTRY_DSN: z.string().optional(),
-  SENTRY_ENV: z.string().optional()
+  SENTRY_ENV: z.string().optional(),
+  // Recovery configuration
+  ANALYSIS_PROCESSING_TIMEOUT_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
+  ANALYSIS_FAILED_RETRY_DELAY_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
+  ANALYSIS_MAX_RETRY_COUNT: z.coerce.number().int().nonnegative().default(3),
+  ANALYSIS_RECOVERY_INTERVAL_MS: z.coerce.number().int().positive().default(60 * 1000)
 });
 
 export type Config = {
@@ -28,6 +33,11 @@ export type Config = {
   logLevel: string;
   sentryDsn?: string;
   sentryEnv?: string;
+  // Recovery configuration
+  analysisProcessingTimeoutMs: number;
+  analysisFailedRetryDelayMs: number;
+  analysisMaxRetryCount: number;
+  analysisRecoveryIntervalMs: number;
 };
 
 export function loadConfig(): Config {
@@ -49,6 +59,11 @@ export function loadConfig(): Config {
     geminiModel: parsed.data.GEMINI_MODEL ?? "gemini-1.5-flash",
     logLevel: parsed.data.LOG_LEVEL,
     sentryDsn: parsed.data.SENTRY_DSN,
-    sentryEnv: parsed.data.SENTRY_ENV
+    sentryEnv: parsed.data.SENTRY_ENV,
+    // Recovery configuration
+    analysisProcessingTimeoutMs: parsed.data.ANALYSIS_PROCESSING_TIMEOUT_MS,
+    analysisFailedRetryDelayMs: parsed.data.ANALYSIS_FAILED_RETRY_DELAY_MS,
+    analysisMaxRetryCount: parsed.data.ANALYSIS_MAX_RETRY_COUNT,
+    analysisRecoveryIntervalMs: parsed.data.ANALYSIS_RECOVERY_INTERVAL_MS
   };
 }

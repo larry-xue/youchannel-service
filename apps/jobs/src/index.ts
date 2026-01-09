@@ -1,6 +1,7 @@
 import { config } from "dotenv";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hostname } from "node:os";
 
 // Load .env file explicitly from the jobs app directory
 const __filename = fileURLToPath(import.meta.url);
@@ -22,6 +23,7 @@ import { buildSupabaseClient } from "./supabase.js";
 import { buildServer } from "./server.js";
 import { createDbPool } from "./db.js";
 import { registerWorkers } from "./workers.js";
+import { recoverOrphanedJobs, startRecoveryScheduler } from "./recovery.js";
 
 function isValidDatabaseUrl(databaseUrl: string) {
   try {
@@ -82,6 +84,10 @@ function normalizeDatabaseUrl(databaseUrl: string, logger: Logger) {
   return databaseUrl;
 }
 
+function generateInstanceId() {
+  return `${hostname()}-${process.pid}-${Date.now()}`;
+}
+
 let configObj: Config;
 let logger: Logger;
 
@@ -129,6 +135,10 @@ boss.on("error", (error) => {
 });
 
 async function start() {
+  // Generate unique instance ID for this worker
+  const instanceId = generateInstanceId();
+  logger.info({ instanceId }, "Starting jobs service...");
+
   logger.info("Starting pg-boss...");
   try {
     await boss.start();
@@ -138,15 +148,36 @@ async function start() {
     throw error;
   }
 
-  await registerWorkers({ boss, db, logger, config: configObj });
+  await registerWorkers({ boss, db, logger, config: configObj, instanceId });
+
+  // Run initial recovery to pick up any orphaned jobs from previous runs
+  logger.info("Running initial job recovery...");
+  const recoveryResult = await recoverOrphanedJobs({
+    boss,
+    db,
+    logger,
+    config: configObj,
+    instanceId
+  });
+  logger.info(recoveryResult, "Initial job recovery completed");
+
+  // Start periodic recovery scheduler
+  const stopRecovery = startRecoveryScheduler({
+    boss,
+    db,
+    logger,
+    config: configObj,
+    instanceId
+  });
 
   const app = await buildServer({ config: configObj, logger, boss, db, supabase });
   await app.listen({ port: configObj.port, host: "0.0.0.0" });
 
-  logger.info({ port: configObj.port }, "Jobs service running");
+  logger.info({ port: configObj.port, instanceId }, "Jobs service running");
 
   const shutdown = async () => {
     logger.info("Shutting down...");
+    stopRecovery();
     await app.close();
     await boss.stop();
     await db.end();

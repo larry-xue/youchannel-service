@@ -502,8 +502,14 @@ async function upsertVideoAnalysisIfStatus(
     error: string | null;
     skipReason: string | null;
     allowedStatuses: AnalysisStatus[];
+    instanceId?: string;
   }
 ) {
+  // For processing status, set claimed_at and claimed_by
+  const isProcessing = params.status === ANALYSIS_STATUS.processing;
+  const claimedAt = isProcessing ? "NOW()" : "NULL";
+  const claimedBy = isProcessing && params.instanceId ? params.instanceId : null;
+
   const result = await db.query<{ id: string; status: AnalysisStatus }>(
     `insert into video_analyses (
        video_id,
@@ -513,8 +519,10 @@ async function upsertVideoAnalysisIfStatus(
        usage,
        status,
        error,
-       skip_reason
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8)
+       skip_reason,
+       claimed_at,
+       claimed_by
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, ${claimedAt}, $9)
      on conflict (video_id)
      do update set
        user_id = excluded.user_id,
@@ -523,8 +531,10 @@ async function upsertVideoAnalysisIfStatus(
        usage = excluded.usage,
        status = excluded.status,
        error = excluded.error,
-       skip_reason = excluded.skip_reason
-     where video_analyses.status = any($9::text[])
+       skip_reason = excluded.skip_reason,
+       claimed_at = ${claimedAt},
+       claimed_by = excluded.claimed_by
+     where video_analyses.status = any($10::text[])
      returning id, status`,
     [
       params.videoId,
@@ -535,6 +545,7 @@ async function upsertVideoAnalysisIfStatus(
       params.status,
       params.error,
       params.skipReason,
+      claimedBy,
       params.allowedStatuses
     ]
   );
@@ -691,8 +702,9 @@ export async function registerWorkers(params: {
   db: DbPool;
   logger: Logger;
   config: Config;
+  instanceId: string;
 }) {
-  const { boss, db, logger, config } = params;
+  const { boss, db, logger, config, instanceId } = params;
 
   // Ensure queue exists before registering worker
   await boss.createQueue("analyze.video");
@@ -773,7 +785,8 @@ export async function registerWorkers(params: {
       usage: null,
       error: null,
       skipReason: null,
-      allowedStatuses: reclaimableStatuses
+      allowedStatuses: reclaimableStatuses,
+      instanceId
     });
 
     if (!claimed) {
