@@ -625,7 +625,7 @@ export async function buildServer(params: {
   });
 
   // Quota admin API endpoints
-  
+
   // GET /admin/quota/:userId - Get user quota details
   app.get("/admin/quota/:userId", { preHandler: requireAdmin }, async (request, reply) => {
     const { userId } = request.params as { userId: string };
@@ -668,7 +668,7 @@ export async function buildServer(params: {
 
     // Get user info
     const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
-    
+
     return {
       user: userError ? null : {
         id: userData.user.id,
@@ -683,7 +683,7 @@ export async function buildServer(params: {
   // POST /admin/quota/grants - Add grant for user
   app.post("/admin/quota/grants", { preHandler: requireAdmin }, async (request, reply) => {
     const body = request.body as Record<string, unknown> | null;
-    
+
     const userId = parseRequiredString(body?.userId);
     const videoSecondsTotal = parseLimit(body?.videoSecondsTotal);
     const chatSecondsTotal = parseLimit(body?.chatSecondsTotal);
@@ -746,7 +746,7 @@ export async function buildServer(params: {
   // POST /admin/quota/refund - Issue refund via RPC
   app.post("/admin/quota/refund", { preHandler: requireAdmin }, async (request, reply) => {
     const body = request.body as Record<string, unknown> | null;
-    
+
     const userId = parseRequiredString(body?.userId);
     const originalEventId = parseRequiredString(body?.originalEventId);
     const reason = parseOptionalString(body?.reason);
@@ -781,7 +781,7 @@ export async function buildServer(params: {
   // POST /admin/quota/refresh - Refresh user quota cache
   app.post("/admin/quota/refresh", { preHandler: requireAdmin }, async (request, reply) => {
     const body = request.body as Record<string, unknown> | null;
-    
+
     const userId = parseRequiredString(body?.userId);
 
     if (!userId) {

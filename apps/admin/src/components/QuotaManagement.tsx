@@ -1,72 +1,43 @@
+import { useEffect, useState, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, useMemo } from "react";
+import { useSearch } from "@tanstack/react-router";
 import {
   useReactTable,
   getCoreRowModel,
-  getPaginationRowModel,
   flexRender,
   createColumnHelper,
-  type PaginationState,
 } from "@tanstack/react-table";
 import { useAuth } from "../lib/auth";
 import {
+  fetchUserQuota,
   addQuotaGrant,
-  fetchQuotaInfo,
   refundQuota,
-  type QuotaUsageEvent,
+  refreshQuotaCache,
   type QuotaGrant,
-  type QuotaInfo
+  type QuotaUsageEvent,
+  type AddGrantParams
 } from "../lib/jobsApi";
-import { Alert, AlertDescription } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
+import { Alert, AlertDescription } from "./ui/alert";
+import { Skeleton } from "./ui/skeleton";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
+  DialogTrigger
 } from "./ui/dialog";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
-import { Skeleton } from "./ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import {
-  Activity,
-  AlertCircle,
-  CheckCircle2,
-  Clock,
-  CreditCard,
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  Search,
-  User,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  Loader2
-} from "lucide-react";
-
-function formatSeconds(seconds: number) {
-  if (seconds < 60) return `${seconds}秒`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (remainingSeconds === 0) return `${minutes}分钟`;
-  return `${minutes}分${remainingSeconds}秒`;
-}
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { Search, Plus, RefreshCw, Undo2, Loader2 } from "lucide-react";
 
 function formatTime(value: string | null | undefined) {
   if (!value) return "-";
@@ -75,52 +46,50 @@ function formatTime(value: string | null | undefined) {
   return date.toLocaleString();
 }
 
-function shortId(value: string | null | undefined, length = 8) {
-  if (!value) return "-";
-  if (value.length <= length + 3) return value;
-  return `${value.slice(0, length)}...`;
+function formatSeconds(seconds: number) {
+  if (seconds === 0) return "0 秒";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  const parts = [];
+  if (hours > 0) parts.push(`${hours} 小时`);
+  if (minutes > 0) parts.push(`${minutes} 分钟`);
+  if (secs > 0) parts.push(`${secs} 秒`);
+  return parts.join(" ");
 }
 
-const eventTypeBadge = (type: string) => {
-  switch (type) {
-    case "admin_grant":
-      return <Badge variant="secondary">管理员授权</Badge>;
-    case "analysis_cost":
-      return <Badge variant="outline">分析消耗</Badge>;
-    case "refund":
-      return <Badge variant="default" className="bg-green-600 hover:bg-green-700">退款/返还</Badge>;
-    default:
-      return <Badge variant="outline">{type}</Badge>;
-  }
-};
+function statusBadge(grant: QuotaGrant) {
+  const now = new Date();
+  const validFrom = new Date(grant.valid_from);
+  const validTo = grant.valid_to ? new Date(grant.valid_to) : null;
 
-const statusBadge = (status: string) => {
-  switch (status) {
-    case "completed":
-      return (
-        <Badge variant="outline" className="border-green-500 text-green-500">
-          <CheckCircle2 className="mr-1 h-3 w-3" />
-          成功
-        </Badge>
-      );
-    case "refunded":
-      return (
-        <Badge variant="secondary" className="text-muted-foreground">
-          <RotateCcw className="mr-1 h-3 w-3" />
-          已退款
-        </Badge>
-      );
-    case "failed":
-      return (
-        <Badge variant="destructive">
-          <AlertCircle className="mr-1 h-3 w-3" />
-          失败
-        </Badge>
-      );
-    default:
-      return <Badge variant="outline">{status}</Badge>;
+  if (grant.status === "revoked") {
+    return <Badge variant="destructive">已撤销</Badge>;
   }
-};
+  if (validFrom > now) {
+    return <Badge variant="outline">未生效</Badge>;
+  }
+  if (validTo && validTo < now) {
+    return <Badge variant="secondary">已过期</Badge>;
+  }
+  if (grant.video_seconds_remaining <= 0 && grant.chat_seconds_remaining <= 0) {
+    return <Badge variant="secondary">已耗尽</Badge>;
+  }
+  return <Badge variant="default">有效</Badge>;
+}
+
+function eventTypeBadge(eventType: string) {
+  switch (eventType) {
+    case "consume":
+      return <Badge variant="destructive">消费</Badge>;
+    case "refund":
+      return <Badge variant="default">退款</Badge>;
+    case "adjust":
+      return <Badge variant="secondary">调整</Badge>;
+    default:
+      return <Badge variant="outline">{eventType}</Badge>;
+  }
+}
 
 const grantsColumnHelper = createColumnHelper<QuotaGrant>();
 const eventsColumnHelper = createColumnHelper<QuotaUsageEvent>();
@@ -129,734 +98,736 @@ export function QuotaManagement() {
   const { session } = useAuth();
   const token = session?.access_token;
   const queryClient = useQueryClient();
+  const search = useSearch({ strict: false }) as { userId?: string };
 
-  // Dialog State
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [isRefundDialogOpen, setIsRefundDialogOpen] = useState(false);
+  const [searchUserId, setSearchUserId] = useState(search.userId ?? "");
+  const [activeUserId, setActiveUserId] = useState<string | null>(search.userId ?? null);
+  const [error, setError] = useState<string | null>(null);
+  const [addGrantOpen, setAddGrantOpen] = useState(false);
+  const [refundDialogOpen, setRefundDialogOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<QuotaUsageEvent | null>(null);
-
-  // Form State
-  const [targetUserId, setTargetUserId] = useState("");
-  const [grantAmount, setGrantAmount] = useState("30"); // Default 30 mins
-  const [grantPeriod, setGrantPeriod] = useState("monthly");
   const [refundReason, setRefundReason] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
 
-  // Pagination State for Grants Table
-  const [grantsPagination, setGrantsPagination] = useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: 10,
+  const [grantForm, setGrantForm] = useState<{
+    videoSecondsTotal: string;
+    chatSecondsTotal: string;
+    maxVideoSeconds: string;
+    sourceType: string;
+    sourceRef: string;
+    validTo: string;
+    consumePriority: string;
+  }>({
+    videoSecondsTotal: "3600",
+    chatSecondsTotal: "7200",
+    maxVideoSeconds: "1800",
+    sourceType: "manual",
+    sourceRef: "",
+    validTo: "",
+    consumePriority: "100"
   });
 
-  // Pagination State for Events Table
-  const [eventsPagination, setEventsPagination] = useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: 10,
-  });
+  // Sync with URL search param changes
+  useEffect(() => {
+    if (search.userId) {
+      setSearchUserId(search.userId);
+      setActiveUserId(search.userId);
+    }
+  }, [search.userId]);
 
   const quotaQuery = useQuery({
-    queryKey: ["admin-quota"],
-    enabled: Boolean(token),
-    queryFn: () => fetchQuotaInfo(token ?? "")
+    queryKey: ["user-quota", activeUserId],
+    enabled: Boolean(token && activeUserId),
+    queryFn: () => fetchUserQuota(token ?? "", activeUserId ?? "")
   });
 
   const addGrantMutation = useMutation({
-    mutationFn: () =>
-      addQuotaGrant(token ?? "", {
-        userId: targetUserId.trim(),
-        videoSecondsTotal: Number.parseInt(grantAmount) * 60, // minutes to seconds
-        chatSecondsTotal: 0, // Simplified for this UI
-        maxVideoSeconds: 3600, // Default max video length
-        sourceType: "admin_grant",
-      }),
+    mutationFn: (params: AddGrantParams) => addQuotaGrant(token ?? "", params),
     onSuccess: (data) => {
       if (data.error) {
-        setFormError(data.error);
+        setError(data.error);
       } else {
-        setIsAddDialogOpen(false);
-        setTargetUserId("");
-        setGrantAmount("30");
-        setFormError(null);
-        queryClient.invalidateQueries({ queryKey: ["admin-quota"] });
+        setAddGrantOpen(false);
+        setError(null);
+        queryClient.invalidateQueries({ queryKey: ["user-quota", activeUserId] });
       }
     },
     onError: (err: Error) => {
-      setFormError(err.message);
+      setError(err.message);
     }
   });
 
   const refundMutation = useMutation({
-    mutationFn: () => {
-      if (!selectedEvent) throw new Error("No event selected");
-      return refundQuota(token ?? "", {
-        userId: selectedEvent.user_id,
-        originalEventId: selectedEvent.id,
-        reason: refundReason
-      });
-    },
+    mutationFn: (params: { userId: string; originalEventId: string; reason?: string }) =>
+      refundQuota(token ?? "", params),
     onSuccess: (data) => {
       if (data.error) {
-        setFormError(data.error);
+        setError(data.error);
       } else {
-        setIsRefundDialogOpen(false);
+        setRefundDialogOpen(false);
         setSelectedEvent(null);
         setRefundReason("");
-        setFormError(null);
-        queryClient.invalidateQueries({ queryKey: ["admin-quota"] });
+        setError(null);
+        queryClient.invalidateQueries({ queryKey: ["user-quota", activeUserId] });
       }
     },
     onError: (err: Error) => {
-      setFormError(err.message);
+      setError(err.message);
     }
   });
 
-  const handleOpenRefund = (event: QuotaUsageEvent) => {
-    setSelectedEvent(event);
-    setRefundReason("");
-    setFormError(null);
-    setIsRefundDialogOpen(true);
+  const refreshMutation = useMutation({
+    mutationFn: (userId: string) => refreshQuotaCache(token ?? "", userId),
+    onSuccess: (data) => {
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setError(null);
+        queryClient.invalidateQueries({ queryKey: ["user-quota", activeUserId] });
+      }
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+    }
+  });
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const trimmed = searchUserId.trim();
+    if (!trimmed) {
+      setError("请输入用户 ID");
+      return;
+    }
+    setActiveUserId(trimmed);
   };
 
-  const grants = quotaQuery.data?.grants ?? [];
-  const events = quotaQuery.data?.events ?? [];
+  const handleAddGrant = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeUserId) return;
+
+    const params: AddGrantParams = {
+      userId: activeUserId,
+      videoSecondsTotal: parseInt(grantForm.videoSecondsTotal, 10) || 0,
+      chatSecondsTotal: parseInt(grantForm.chatSecondsTotal, 10) || 0,
+      maxVideoSeconds: parseInt(grantForm.maxVideoSeconds, 10) || 0,
+      sourceType: grantForm.sourceType,
+      sourceRef: grantForm.sourceRef || undefined,
+      validTo: grantForm.validTo || undefined,
+      consumePriority: parseInt(grantForm.consumePriority, 10) || 100
+    };
+
+    addGrantMutation.mutate(params);
+  };
+
+  const handleRefund = () => {
+    if (!activeUserId || !selectedEvent) return;
+    refundMutation.mutate({
+      userId: activeUserId,
+      originalEventId: selectedEvent.id,
+      reason: refundReason || undefined
+    });
+  };
+
+  const handleRefresh = () => {
+    if (!activeUserId) return;
+    refreshMutation.mutate(activeUserId);
+  };
+
+  const quotaData = quotaQuery.data;
+  const cache = quotaData?.quotaCache;
+  const grants = quotaData?.grants ?? [];
+  const events = quotaData?.events ?? [];
 
   const grantsColumns = useMemo(() => [
-    grantsColumnHelper.accessor("user_id", {
-      header: "用户",
+    grantsColumnHelper.accessor("status", {
+      header: "状态",
+      cell: (info) => statusBadge(info.row.original),
+    }),
+    grantsColumnHelper.accessor("source_type", {
+      header: "来源",
       cell: (info) => {
-        const row = info.row.original;
+        const grant = info.row.original;
         return (
-          <div className="flex flex-col">
-            <span className="font-medium">{row.user_email || "无邮箱"}</span>
-            <span className="font-mono text-xs text-muted-foreground mr-1">
-              {shortId(row.user_id)}
-            </span>
-            {row.user_role && (
-              <Badge variant="outline" className="w-fit text-[10px] mt-1">
-                {row.user_role}
-              </Badge>
+          <>
+            <div className="text-sm">{grant.source_type}</div>
+            {grant.source_ref && (
+              <div className="text-xs text-muted-foreground truncate max-w-32">
+                {grant.source_ref}
+              </div>
+            )}
+          </>
+        );
+      }
+    }),
+    grantsColumnHelper.accessor("video_seconds_remaining", {
+      header: "视频剩余/总量",
+      cell: (info) =>
+        `${formatSeconds(info.getValue())} / ${formatSeconds(info.row.original.video_seconds_total)}`,
+    }),
+    grantsColumnHelper.accessor("chat_seconds_remaining", {
+      header: "聊天剩余/总量",
+      cell: (info) =>
+        `${formatSeconds(info.getValue())} / ${formatSeconds(info.row.original.chat_seconds_total)}`,
+    }),
+    grantsColumnHelper.accessor("max_video_seconds", {
+      header: "最大视频时长",
+      cell: (info) => formatSeconds(info.getValue()),
+    }),
+    grantsColumnHelper.accessor("consume_priority", {
+      header: "优先级",
+      cell: (info) => info.getValue(),
+    }),
+    grantsColumnHelper.accessor("valid_from", {
+      header: "有效期",
+      cell: (info) => {
+        const grant = info.row.original;
+        return (
+          <div className="text-xs">
+            {formatTime(grant.valid_from)}
+            {grant.valid_to && (
+              <>
+                <br />至 {formatTime(grant.valid_to)}
+              </>
             )}
           </div>
         )
       }
     }),
-    grantsColumnHelper.display({
-      id: "period",
-      header: "类型/状态",
-      cell: (info) => {
-        const row = info.row.original;
-        const isActive = row.valid_to ? new Date(row.valid_to) > new Date() : true;
-        return (
-          <div className="flex flex-col gap-1">
-            <Badge variant="outline" className="w-fit">
-              {/* Infer period from validity or metadata if available, currently simplified */}
-              配额授权
-            </Badge>
-            <Badge
-              variant={isActive ? "secondary" : "destructive"}
-              className="w-fit text-[10px]"
-            >
-              {isActive ? "生效中" : "已过期"}
-            </Badge>
-          </div>
-        );
-      }
+    grantsColumnHelper.accessor("created_at", {
+      header: "创建时间",
+      cell: (info) => <div className="text-sm">{formatTime(info.getValue())}</div>,
     }),
-    grantsColumnHelper.accessor("video_seconds_total", {
-      header: "总额度",
-      cell: (info) => (
-        <span className="font-medium text-primary">
-          {formatSeconds(info.getValue())}
-        </span>
-      ),
-    }),
-    grantsColumnHelper.display({
-      id: "used_seconds",
-      header: "已使用",
-      cell: (info) => {
-        const row = info.row.original;
-        const used = row.video_seconds_total - row.video_seconds_remaining;
-        const percent = row.video_seconds_total > 0
-          ? Math.min(100, Math.round((used / row.video_seconds_total) * 100))
-          : 0;
-
-        return (
-          <div className="w-[100px]">
-            <div className="mb-1 text-xs">
-              {formatSeconds(used)}
-              <span className="ml-1 text-muted-foreground">({percent}%)</span>
-            </div>
-            <div className="h-1.5 w-full rounded-full bg-secondary">
-              <div
-                className="h-full rounded-full bg-primary transition-all"
-                style={{ width: `${percent}%` }}
-              />
-            </div>
-          </div>
-        );
-      }
-    }),
-    grantsColumnHelper.accessor("valid_to", {
-      header: "有效期至",
-      cell: (info) => (
-        <div className="text-xs text-muted-foreground">
-          <div className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            结束: {formatTime(info.getValue())}
-          </div>
-          <div className="mt-0.5">
-            更新: {formatTime(info.row.original.updated_at)}
-          </div>
-        </div>
-      ),
-    }),
-    grantsColumnHelper.display({
-      id: "actions",
-      header: "操作",
-      cell: () => (
-        <Button variant="ghost" size="sm" disabled>
-          编辑
-        </Button>
-      )
-    })
   ], []);
 
   const eventsColumns = useMemo(() => [
-    // Assuming 'status' is not on QuotaUsageEvent yet based on jobsApi types, 
-    // but 'event_type' matches. I'll remove status column or use event_type.
-    // Wait, QuotaUsageEvent in jobsApi.ts (line 214) doesn't have 'status'.
-    // I'll skip status column for now or infer it.
-    // Also QuotaUsageEvent has quota_before/after which I added.
-    eventsColumnHelper.accessor("user_id", {
-      header: "用户",
-      cell: (info) => {
-        const row = info.row.original;
-        return (
-          <div className="flex flex-col">
-            <span className="font-medium text-xs">{row.user_email || "未知"}</span>
-            <span className="font-mono text-[10px] text-muted-foreground">
-              {shortId(row.user_id)}
-            </span>
-          </div>
-        );
-      }
-    }),
     eventsColumnHelper.accessor("event_type", {
-      header: "事件类型",
+      header: "类型",
       cell: (info) => eventTypeBadge(info.getValue()),
     }),
     eventsColumnHelper.accessor("video_seconds_delta", {
-      header: "额度变动",
+      header: "视频秒数变化",
       cell: (info) => {
         const val = info.getValue();
         return (
-          <span
-            className={`font-mono font-medium ${val > 0 ? "text-green-600" : "text-destructive"
-              }`}
-          >
-            {val > 0 ? "+" : ""}
-            {formatSeconds(val)}
+          <span className={val < 0 ? "text-destructive" : "text-green-600"}>
+            {val > 0 ? "+" : ""}{val}
           </span>
         );
       }
     }),
-    eventsColumnHelper.display({ // Combined quota info
-      id: "quota_snapshot",
-      header: "配额快照",
+    eventsColumnHelper.accessor("chat_seconds_delta", {
+      header: "聊天秒数变化",
       cell: (info) => {
-        const row = info.row.original;
-        if (row.quota_before === null || row.quota_before === undefined || row.quota_after === null || row.quota_after === undefined) return "-";
+        const val = info.getValue();
         return (
-          <div className="flex flex-col text-xs text-muted-foreground">
-            <span>前: {formatSeconds(row.quota_before)}</span>
-            <span className="font-medium text-foreground">
-              后: {formatSeconds(row.quota_after)}
-            </span>
+          <span className={val < 0 ? "text-destructive" : "text-green-600"}>
+            {val > 0 ? "+" : ""}{val}
+          </span>
+        );
+      }
+    }),
+    eventsColumnHelper.accessor("reason", {
+      header: "原因",
+      cell: (info) => {
+        const reason = info.getValue();
+        return (
+          <div className="max-w-48 truncate">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>{reason ?? "-"}</span>
+              </TooltipTrigger>
+              {reason && (
+                <TooltipContent className="max-w-md">{reason}</TooltipContent>
+              )}
+            </Tooltip>
           </div>
         );
       }
     }),
     eventsColumnHelper.accessor("created_at", {
       header: "时间",
-      cell: (info) => <span className="text-xs text-muted-foreground">{formatTime(info.getValue())}</span>
+      cell: (info) => <div className="text-sm">{formatTime(info.getValue())}</div>,
     }),
     eventsColumnHelper.display({
       id: "actions",
       header: "操作",
       cell: (info) => {
-        const row = info.row.original;
-        // Only allow refund if it was a cost (negative delta) and not already refunded (?)
-        // We don't have 'status' field to check if refunded.
-        if (row.event_type !== "analysis_cost" || row.video_seconds_delta >= 0) return null;
-        return (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => handleOpenRefund(row)}
-          >
-            退款
-          </Button>
+        const event = info.row.original;
+        const isConsume = event.event_type === "consume";
+        const hasRefund = events.some(
+          (e) =>
+            e.event_type === "refund" &&
+            e.context &&
+            (e.context as Record<string, unknown>).original_event_id === event.id
         );
+
+        if (isConsume && !hasRefund) {
+          return (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSelectedEvent(event);
+                setRefundDialogOpen(true);
+              }}
+            >
+              <Undo2 className="h-4 w-4" />
+            </Button>
+          );
+        }
+        if (hasRefund) {
+          return <Badge variant="outline" className="text-xs">已退款</Badge>;
+        }
+        return null;
       }
     })
-  ], [handleOpenRefund]);
+  ], [events]);
 
   const grantsTable = useReactTable({
     data: grants,
     columns: grantsColumns,
-    state: {
-      pagination: grantsPagination,
-    },
-    onPaginationChange: setGrantsPagination,
     getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
   });
 
   const eventsTable = useReactTable({
-    data: events, // Currently limited to 50 from backend but table handles what it gets
+    data: events,
     columns: eventsColumns,
-    state: {
-      pagination: eventsPagination
-    },
-    onPaginationChange: setEventsPagination,
     getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
   });
-
-  const PAGE_SIZE_OPTIONS = [
-    { value: "10", label: "每页 10 条" },
-    { value: "20", label: "每页 20 条" },
-    { value: "50", label: "每页 50 条" },
-  ];
-
-  const renderPagination = (table: any, dataLength: number, label: string) => (
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-      <div className="flex items-center gap-4 text-sm text-muted-foreground">
-        <span>
-          第 {table.getState().pagination.pageIndex + 1} 页，共 {table.getPageCount()} 页 · 显示 {dataLength} 条{label}
-        </span>
-        <Select
-          value={`${table.getState().pagination.pageSize}`}
-          onValueChange={(value) => {
-            table.setPageSize(Number(value));
-          }}
-        >
-          <SelectTrigger className="h-8 w-[120px]">
-            <SelectValue placeholder={table.getState().pagination.pageSize} />
-          </SelectTrigger>
-          <SelectContent side="top">
-            {PAGE_SIZE_OPTIONS.map((pageSize) => (
-              <SelectItem key={pageSize.value} value={pageSize.value}>
-                {pageSize.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex items-center space-x-2">
-        <Button
-          variant="outline"
-          className="h-8 w-8 p-0"
-          onClick={() => table.setPageIndex(0)}
-          disabled={!table.getCanPreviousPage()}
-        >
-          <span className="sr-only">Go to first page</span>
-          <ChevronsLeft className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          className="h-8 w-8 p-0"
-          onClick={() => table.previousPage()}
-          disabled={!table.getCanPreviousPage()}
-        >
-          <span className="sr-only">Go to previous page</span>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          className="h-8 w-8 p-0"
-          onClick={() => table.nextPage()}
-          disabled={!table.getCanNextPage()}
-        >
-          <span className="sr-only">Go to next page</span>
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          className="h-8 w-8 p-0"
-          onClick={() => table.setPageIndex(table.getPageCount() - 1)}
-          disabled={!table.getCanNextPage()}
-        >
-          <span className="sr-only">Go to last page</span>
-          <ChevronsRight className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">配额管理</h2>
-          <p className="text-muted-foreground">
-            管理系统用户的 API 调用配额和计费事件。
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => queryClient.invalidateQueries({ queryKey: ["admin-quota"] })}
-            disabled={quotaQuery.isFetching}
-          >
-            <RefreshCw
-              className={`mr-2 h-4 w-4 ${quotaQuery.isFetching ? "animate-spin" : ""}`}
+      {/* Search Card */}
+      <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
+        <CardHeader>
+          <CardTitle>用户配额管理</CardTitle>
+          <CardDescription>
+            输入用户 ID 查看和管理其配额信息
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSearch} className="flex gap-3">
+            <Input
+              placeholder="输入用户 UUID"
+              value={searchUserId}
+              onChange={(e) => setSearchUserId(e.target.value)}
+              className="flex-1"
             />
-            刷新数据
-          </Button>
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                授予配额
-              </Button>
-            </DialogTrigger>
+            <Button type="submit" disabled={quotaQuery.isLoading}>
+              {quotaQuery.isLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Search className="h-4 w-4" />
+              )}
+              查询
+            </Button>
+          </form>
+          {error && (
+            <Alert variant="destructive" className="mt-4 border-destructive/60 bg-destructive/5">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* After search: show user quota info */}
+      {activeUserId && quotaQuery.isLoading && (
+        <div className="space-y-3">
+          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      )}
+
+      {activeUserId && quotaQuery.error && (
+        <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
+          <AlertDescription>
+            加载失败: {String(quotaQuery.error)}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {activeUserId && quotaData && (
+        <>
+          {/* User Info & Summary */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
+              <CardHeader className="pb-2">
+                <CardDescription>用户信息</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm font-medium truncate">
+                  {quotaData.user?.email ?? "无邮箱"}
+                </div>
+                <div className="text-xs text-muted-foreground truncate mt-1">
+                  {activeUserId}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
+              <CardHeader className="pb-2">
+                <CardDescription>视频配额</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {cache ? (
+                  <>
+                    <div className="text-2xl font-bold">
+                      {formatSeconds(cache.video_seconds_remaining)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      总计 {formatSeconds(cache.video_seconds_total)}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-muted-foreground">无缓存数据</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
+              <CardHeader className="pb-2">
+                <CardDescription>聊天配额</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {cache ? (
+                  <>
+                    <div className="text-2xl font-bold">
+                      {formatSeconds(cache.chat_seconds_remaining)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      总计 {formatSeconds(cache.chat_seconds_total)}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-muted-foreground">无缓存数据</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
+              <CardHeader className="pb-2">
+                <CardDescription>最大视频时长</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {cache ? (
+                  <div className="text-2xl font-bold">
+                    {formatSeconds(cache.max_video_seconds)}
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground">无缓存数据</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Action Bar */}
+          <div className="flex flex-wrap gap-2">
+            <Dialog open={addGrantOpen} onOpenChange={setAddGrantOpen}>
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="h-4 w-4" />
+                  添加授权
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>添加配额授权</DialogTitle>
+                  <DialogDescription>
+                    为用户 {quotaData.user?.email ?? activeUserId} 添加新的配额授权
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleAddGrant} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>视频秒数</Label>
+                      <Input
+                        type="number"
+                        value={grantForm.videoSecondsTotal}
+                        onChange={(e) =>
+                          setGrantForm({ ...grantForm, videoSecondsTotal: e.target.value })
+                        }
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>聊天秒数</Label>
+                      <Input
+                        type="number"
+                        value={grantForm.chatSecondsTotal}
+                        onChange={(e) =>
+                          setGrantForm({ ...grantForm, chatSecondsTotal: e.target.value })
+                        }
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>最大视频时长</Label>
+                      <Input
+                        type="number"
+                        value={grantForm.maxVideoSeconds}
+                        onChange={(e) =>
+                          setGrantForm({ ...grantForm, maxVideoSeconds: e.target.value })
+                        }
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>消费优先级</Label>
+                      <Input
+                        type="number"
+                        value={grantForm.consumePriority}
+                        onChange={(e) =>
+                          setGrantForm({ ...grantForm, consumePriority: e.target.value })
+                        }
+                      />
+                      <p className="text-xs text-muted-foreground">数字越小优先级越高</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>来源类型</Label>
+                      <Select
+                        value={grantForm.sourceType}
+                        onValueChange={(v) => setGrantForm({ ...grantForm, sourceType: v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="manual">手动</SelectItem>
+                          <SelectItem value="promo">促销</SelectItem>
+                          <SelectItem value="subscription">订阅</SelectItem>
+                          <SelectItem value="package">套餐</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>来源引用</Label>
+                      <Input
+                        placeholder="工单号或备注"
+                        value={grantForm.sourceRef}
+                        onChange={(e) =>
+                          setGrantForm({ ...grantForm, sourceRef: e.target.value })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>过期时间 (可选)</Label>
+                    <Input
+                      type="datetime-local"
+                      value={grantForm.validTo}
+                      onChange={(e) =>
+                        setGrantForm({ ...grantForm, validTo: e.target.value })
+                      }
+                    />
+                  </div>
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button variant="outline" type="button">取消</Button>
+                    </DialogClose>
+                    <Button type="submit" disabled={addGrantMutation.isPending}>
+                      {addGrantMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          添加中...
+                        </>
+                      ) : (
+                        "添加授权"
+                      )}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={refreshMutation.isPending}
+            >
+              {refreshMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              刷新缓存
+            </Button>
+          </div>
+
+          {/* Grants Table */}
+          <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
+            <CardHeader>
+              <CardTitle>配额授权</CardTitle>
+              <CardDescription>当前用户的所有配额授权</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TooltipProvider>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      {grantsTable.getHeaderGroups().map((headerGroup) => (
+                        <TableRow key={headerGroup.id}>
+                          {headerGroup.headers.map((header) => (
+                            <TableHead key={header.id}>
+                              {header.isPlaceholder
+                                ? null
+                                : flexRender(
+                                  header.column.columnDef.header,
+                                  header.getContext()
+                                )}
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableHeader>
+                    <TableBody>
+                      {grantsTable.getRowModel().rows?.length ? (
+                        grantsTable.getRowModel().rows.map((row) => (
+                          <TableRow
+                            key={row.id}
+                            data-state={row.getIsSelected() && "selected"}
+                          >
+                            {row.getVisibleCells().map((cell) => (
+                              <TableCell key={cell.id}>
+                                {flexRender(
+                                  cell.column.columnDef.cell,
+                                  cell.getContext()
+                                )}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={grantsColumns.length} className="py-8 text-center text-muted-foreground">
+                            暂无配额授权
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </TooltipProvider>
+            </CardContent>
+          </Card>
+
+          {/* Events Table */}
+          <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
+            <CardHeader>
+              <CardTitle>使用记录</CardTitle>
+              <CardDescription>最近 50 条配额使用事件</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TooltipProvider>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      {eventsTable.getHeaderGroups().map((headerGroup) => (
+                        <TableRow key={headerGroup.id}>
+                          {headerGroup.headers.map((header) => (
+                            <TableHead key={header.id}>
+                              {header.isPlaceholder
+                                ? null
+                                : flexRender(
+                                  header.column.columnDef.header,
+                                  header.getContext()
+                                )}
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableHeader>
+                    <TableBody>
+                      {eventsTable.getRowModel().rows?.length ? (
+                        eventsTable.getRowModel().rows.map((row) => (
+                          <TableRow
+                            key={row.id}
+                            data-state={row.getIsSelected() && "selected"}
+                          >
+                            {row.getVisibleCells().map((cell) => (
+                              <TableCell key={cell.id}>
+                                {flexRender(
+                                  cell.column.columnDef.cell,
+                                  cell.getContext()
+                                )}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={eventsColumns.length} className="py-8 text-center text-muted-foreground">
+                            暂无使用记录
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </TooltipProvider>
+            </CardContent>
+          </Card>
+
+          {/* Refund Dialog */}
+          <Dialog open={refundDialogOpen} onOpenChange={setRefundDialogOpen}>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>授予新配额</DialogTitle>
+                <DialogTitle>发起退款</DialogTitle>
                 <DialogDescription>
-                  为指定用户添加额外的 API 使用时长。
+                  将撤销选中的消费事件，配额将退还到原始授权
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="userId">用户 ID (UUID)</Label>
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              {selectedEvent && (
+                <div className="space-y-4">
+                  <div className="rounded-lg border p-3 text-sm">
+                    <div>视频: {selectedEvent.video_seconds_delta} 秒</div>
+                    <div>聊天: {selectedEvent.chat_seconds_delta} 秒</div>
+                    <div className="text-muted-foreground text-xs mt-1">
+                      {formatTime(selectedEvent.created_at)}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>退款原因 (可选)</Label>
                     <Input
-                      id="userId"
-                      placeholder="e.g. 123e4567-e89b-12d3-a456-426614174000"
-                      className="pl-9"
-                      value={targetUserId}
-                      onChange={(e) => setTargetUserId(e.target.value)}
+                      placeholder="输入退款原因"
+                      value={refundReason}
+                      onChange={(e) => setRefundReason(e.target.value)}
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="amount">额度 (分钟)</Label>
-                    <Select value={grantAmount} onValueChange={setGrantAmount}>
-                      <SelectTrigger id="amount">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="10">10 分钟</SelectItem>
-                        <SelectItem value="30">30 分钟</SelectItem>
-                        <SelectItem value="60">1 小时</SelectItem>
-                        <SelectItem value="120">2 小时</SelectItem>
-                        <SelectItem value="300">5 小时</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="period">类型</Label>
-                    <Select value={grantPeriod} onValueChange={setGrantPeriod}>
-                      <SelectTrigger id="period">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="monthly">月度 (自动重置)</SelectItem>
-                        <SelectItem value="onetime">一次性 (叠加)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                {formError && (
-                  <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
-                    <AlertDescription>{formError}</AlertDescription>
-                  </Alert>
-                )}
-              </div>
+              )}
               <DialogFooter>
-                <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setRefundDialogOpen(false);
+                    setSelectedEvent(null);
+                    setRefundReason("");
+                  }}
+                >
                   取消
                 </Button>
-                <Button onClick={() => addGrantMutation.mutate()} disabled={addGrantMutation.isPending}>
-                  {addGrantMutation.isPending && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Button
+                  onClick={handleRefund}
+                  disabled={refundMutation.isPending}
+                >
+                  {refundMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      退款中...
+                    </>
+                  ) : (
+                    "确认退款"
                   )}
-                  确认授权
                 </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </div>
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">总授权额度</CardTitle>
-            <CreditCard className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {quotaQuery.isLoading ? (
-              <Skeleton className="h-8 w-20" />
-            ) : (
-              <div className="text-2xl font-bold">
-                {formatSeconds(
-                  grants.reduce((acc, g) => acc + g.video_seconds_total, 0)
-                )}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">所有用户的总配额池</p>
-          </CardContent>
-        </Card>
-        <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">已使用额度</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {quotaQuery.isLoading ? (
-              <Skeleton className="h-8 w-20" />
-            ) : (
-              <div className="text-2xl font-bold">
-                {formatSeconds(
-                  grants.reduce((acc, g) => acc + (g.video_seconds_total - g.video_seconds_remaining), 0)
-                )}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">当前周期内消耗总量</p>
-          </CardContent>
-        </Card>
-        <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">活跃用户</CardTitle>
-            <User className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            {quotaQuery.isLoading ? (
-              <Skeleton className="h-8 w-20" />
-            ) : (
-              <div className="text-2xl font-bold">
-                {new Set(grants.map((g) => g.user_id)).size}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">拥有配额的用户数</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs defaultValue="grants" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="grants">配额授权</TabsTrigger>
-          <TabsTrigger value="events">使用记录</TabsTrigger>
-        </TabsList>
-        <TabsContent value="grants" className="space-y-4">
-          <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
-            <CardHeader>
-              <CardTitle>授权列表</CardTitle>
-              <CardDescription>
-                所有用户的配额授权详情和使用情况。
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {quotaQuery.isLoading ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : quotaQuery.error ? (
-                <Alert variant="destructive">
-                  <AlertDescription>无法加载配额数据</AlertDescription>
-                </Alert>
-              ) : (
-                <>
-                  <div className="overflow-x-auto rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        {grantsTable.getHeaderGroups().map((headerGroup) => (
-                          <TableRow key={headerGroup.id}>
-                            {headerGroup.headers.map((header) => (
-                              <TableHead key={header.id}>
-                                {header.isPlaceholder
-                                  ? null
-                                  : flexRender(
-                                    header.column.columnDef.header,
-                                    header.getContext()
-                                  )}
-                              </TableHead>
-                            ))}
-                          </TableRow>
-                        ))}
-                      </TableHeader>
-                      <TableBody>
-                        {grantsTable.getRowModel().rows?.length ? (
-                          grantsTable.getRowModel().rows.map((row) => (
-                            <TableRow
-                              key={row.id}
-                              data-state={row.getIsSelected() && "selected"}
-                            >
-                              {row.getVisibleCells().map((cell) => (
-                                <TableCell key={cell.id}>
-                                  {flexRender(
-                                    cell.column.columnDef.cell,
-                                    cell.getContext()
-                                  )}
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={grantsColumns.length} className="py-8 text-center text-muted-foreground">
-                              暂无配额授权
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  {grants.length > 0 && renderPagination(grantsTable, grants.length, "记录")}
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="events" className="space-y-4">
-          <Card className="border-border/70 bg-card/80 shadow-sm backdrop-blur">
-            <CardHeader>
-              <CardTitle>最近事件</CardTitle>
-              <CardDescription>
-                最近 50 条配额使用事件和变更记录。
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {quotaQuery.isLoading ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : (
-                <>
-                  <div className="overflow-x-auto rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        {eventsTable.getHeaderGroups().map((headerGroup) => (
-                          <TableRow key={headerGroup.id}>
-                            {headerGroup.headers.map((header) => (
-                              <TableHead key={header.id}>
-                                {header.isPlaceholder
-                                  ? null
-                                  : flexRender(
-                                    header.column.columnDef.header,
-                                    header.getContext()
-                                  )}
-                              </TableHead>
-                            ))}
-                          </TableRow>
-                        ))}
-                      </TableHeader>
-                      <TableBody>
-                        {eventsTable.getRowModel().rows?.length ? (
-                          eventsTable.getRowModel().rows.map((row) => (
-                            <TableRow
-                              key={row.id}
-                              data-state={row.getIsSelected() && "selected"}
-                            >
-                              {row.getVisibleCells().map((cell) => (
-                                <TableCell key={cell.id}>
-                                  {flexRender(
-                                    cell.column.columnDef.cell,
-                                    cell.getContext()
-                                  )}
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={eventsColumns.length} className="py-8 text-center text-muted-foreground">
-                              暂无事件记录
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  {events.length > 0 && renderPagination(eventsTable, events.length, "事件")}
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      <Dialog open={isRefundDialogOpen} onOpenChange={setIsRefundDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>退款/返还配额</DialogTitle>
-            <DialogDescription>
-              将消耗的配额返还给用户。此操作将增加用户的剩余配额。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">用户:</span>
-                <span className="font-medium">{selectedEvent?.user_email}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">扣除额度:</span>
-                <span className="font-medium text-destructive">
-                  {formatSeconds(Math.abs(selectedEvent?.video_seconds_delta ?? 0))}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">事件 ID:</span>
-                <span className="font-mono text-xs">{selectedEvent?.id}</span>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="reason">退款原因</Label>
-              <Input
-                id="reason"
-                placeholder="例如: 分析任务失败，系统错误"
-                value={refundReason}
-                onChange={(e) => setRefundReason(e.target.value)}
-              />
-            </div>
-            {formError && (
-              <Alert variant="destructive" className="border-destructive/60 bg-destructive/5">
-                <AlertDescription>{formError}</AlertDescription>
-              </Alert>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsRefundDialogOpen(false)}>
-              取消
-            </Button>
-            <Button
-              variant="default"
-              onClick={() => refundMutation.mutate()}
-              disabled={refundMutation.isPending || !refundReason.trim()}
-            >
-              {refundMutation.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <RotateCcw className="mr-2 h-4 w-4" />
-              )}
-              确认退款
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </>
+      )}
     </div>
   );
 }
