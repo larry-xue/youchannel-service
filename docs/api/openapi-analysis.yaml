@@ -270,8 +270,7 @@ components:
           description: |
             Breakdown of skip reasons and their counts. Possible reasons:
             - `duration_exceeded`: Video duration exceeds user's max_video_seconds quota
-            - `already_queued`: Video analysis is already queued or processing
-            - `already_completed`: Video analysis is already completed
+            - `already_pending`: Video analysis is already pending or completed
           example:
             duration_exceeded: 1
 

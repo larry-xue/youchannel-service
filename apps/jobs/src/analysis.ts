@@ -1,5 +1,6 @@
 import type { PgBoss } from "pg-boss";
 import type { DbPool } from "./db.js";
+import type { Config } from "./config.js";
 
 export type AnalysisCandidate = {
   videoId: string;
@@ -110,14 +111,14 @@ export async function fetchAnalysisCandidates(
 export async function enqueueAnalyses(params: {
   boss: PgBoss;
   db: DbPool;
+  config: Config;
   userId: string;
   model: string;
   candidates: AnalysisCandidate[];
 }): Promise<AnalysisResult> {
   const skipReasons: Record<string, number> = {
     duration_exceeded: 0,
-    already_queued: 0,
-    analysis_in_progress: 0,
+    already_pending: 0,
     quota_exceeded: 0
   };
 
@@ -142,7 +143,7 @@ export async function enqueueAnalyses(params: {
     return { enqueued: 0, skipped: params.candidates.length, skipReasons };
   }
 
-  // prompt_hash is removed
+  // Check existing analysis statuses
   const candidateIds = withinDuration.map((candidate) => candidate.videoId);
   const existingStatuses = new Map<string, string>();
   if (candidateIds.length > 0) {
@@ -157,14 +158,11 @@ export async function enqueueAnalyses(params: {
     }
   }
 
+  // Filter out videos that are already pending or completed
   const filtered = withinDuration.filter((candidate) => {
     const status = existingStatuses.get(candidate.videoId);
-    if (status === "queued") {
-      skipReasons.already_queued += 1;
-      return false;
-    }
-    if (status === "processing") {
-      skipReasons.analysis_in_progress += 1;
+    if (status === "pending" || status === "completed") {
+      skipReasons.already_pending += 1;
       return false;
     }
     return true;
@@ -177,6 +175,7 @@ export async function enqueueAnalyses(params: {
 
   let enqueued = 0;
   for (const candidate of filtered) {
+    // Create pending analysis record
     const queued = await params.db.query<{ id: string }>(
       `insert into video_analyses (
          video_id,
@@ -186,20 +185,16 @@ export async function enqueueAnalyses(params: {
          usage,
          status,
          error,
-         skip_reason,
-         claimed_at,
-         claimed_by
-       ) values ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL)
+         skip_reason
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8)
        on conflict (video_id)
        do update set
          user_id = excluded.user_id,
          status = excluded.status,
          error = null,
          skip_reason = null,
-         claimed_at = NULL,
-         claimed_by = NULL
-       where video_analyses.status <> 'queued'
-         and video_analyses.status <> 'processing'
+         updated_at = NOW()
+       where video_analyses.status not in ('pending', 'completed')
        returning id`,
       [
         candidate.videoId,
@@ -207,24 +202,19 @@ export async function enqueueAnalyses(params: {
         "",
         params.model,
         null,
-        "queued",
+        "pending",
         null,
         null
       ]
     );
 
     if (!queued.rows[0]?.id) {
-      const status = existingStatuses.get(candidate.videoId);
-      if (status === "processing") {
-        skipReasons.analysis_in_progress += 1;
-      } else {
-        skipReasons.already_queued += 1;
-      }
+      skipReasons.already_pending += 1;
       continue;
     }
 
     const analysisId = queued.rows[0].id;
-    // Use analysisId as singletonKey to avoid cross-video interference
+    // Send job to pg-boss with retry configuration
     const bossJobId = await params.boss.send(
       "analyze.video",
       {
@@ -232,13 +222,18 @@ export async function enqueueAnalyses(params: {
         userId: params.userId,
         analysisId
       },
-      { singletonKey: `analysis.${analysisId}` }
+      {
+        singletonKey: `analysis.${analysisId}`,
+        retryLimit: params.config.analysisJobRetryLimit,
+        retryDelay: params.config.analysisJobRetryDelaySeconds,
+        expireInSeconds: params.config.analysisJobExpireSeconds
+      }
     );
 
     if (bossJobId) {
       enqueued += 1;
     } else {
-      skipReasons.already_queued += 1;
+      skipReasons.already_pending += 1;
     }
   }
 

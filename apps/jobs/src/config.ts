@@ -13,11 +13,10 @@ const envSchema = z.object({
   LOG_LEVEL: z.string().default("info"),
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENV: z.string().optional(),
-  // Recovery configuration
-  ANALYSIS_PROCESSING_TIMEOUT_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
-  ANALYSIS_FAILED_RETRY_DELAY_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
-  ANALYSIS_MAX_RETRY_COUNT: z.coerce.number().int().nonnegative().default(3),
-  ANALYSIS_RECOVERY_INTERVAL_MS: z.coerce.number().int().positive().default(60 * 1000)
+  // pg-boss job configuration
+  ANALYSIS_JOB_RETRY_LIMIT: z.coerce.number().int().nonnegative().default(3),
+  ANALYSIS_JOB_EXPIRE_SECONDS: z.coerce.number().int().positive().default(15 * 60),
+  ANALYSIS_JOB_RETRY_DELAY_SECONDS: z.coerce.number().int().positive().default(5 * 60)
 });
 
 export type Config = {
@@ -33,11 +32,10 @@ export type Config = {
   logLevel: string;
   sentryDsn?: string;
   sentryEnv?: string;
-  // Recovery configuration
-  analysisProcessingTimeoutMs: number;
-  analysisFailedRetryDelayMs: number;
-  analysisMaxRetryCount: number;
-  analysisRecoveryIntervalMs: number;
+  // pg-boss job configuration
+  analysisJobRetryLimit: number;
+  analysisJobExpireSeconds: number;
+  analysisJobRetryDelaySeconds: number;
 };
 
 export function loadConfig(): Config {
@@ -60,10 +58,9 @@ export function loadConfig(): Config {
     logLevel: parsed.data.LOG_LEVEL,
     sentryDsn: parsed.data.SENTRY_DSN,
     sentryEnv: parsed.data.SENTRY_ENV,
-    // Recovery configuration
-    analysisProcessingTimeoutMs: parsed.data.ANALYSIS_PROCESSING_TIMEOUT_MS,
-    analysisFailedRetryDelayMs: parsed.data.ANALYSIS_FAILED_RETRY_DELAY_MS,
-    analysisMaxRetryCount: parsed.data.ANALYSIS_MAX_RETRY_COUNT,
-    analysisRecoveryIntervalMs: parsed.data.ANALYSIS_RECOVERY_INTERVAL_MS
+    // pg-boss job configuration
+    analysisJobRetryLimit: parsed.data.ANALYSIS_JOB_RETRY_LIMIT,
+    analysisJobExpireSeconds: parsed.data.ANALYSIS_JOB_EXPIRE_SECONDS,
+    analysisJobRetryDelaySeconds: parsed.data.ANALYSIS_JOB_RETRY_DELAY_SECONDS
   };
 }

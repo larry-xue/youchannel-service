@@ -23,7 +23,7 @@ import { buildSupabaseClient } from "./supabase.js";
 import { buildServer } from "./server.js";
 import { createDbPool } from "./db.js";
 import { registerWorkers } from "./workers.js";
-import { recoverOrphanedJobs, startRecoveryScheduler } from "./recovery.js";
+
 
 function isValidDatabaseUrl(databaseUrl: string) {
   try {
@@ -150,26 +150,6 @@ async function start() {
 
   await registerWorkers({ boss, db, logger, config: configObj, instanceId });
 
-  // Run initial recovery to pick up any orphaned jobs from previous runs
-  logger.info("Running initial job recovery...");
-  const recoveryResult = await recoverOrphanedJobs({
-    boss,
-    db,
-    logger,
-    config: configObj,
-    instanceId
-  });
-  logger.info(recoveryResult, "Initial job recovery completed");
-
-  // Start periodic recovery scheduler
-  const stopRecovery = startRecoveryScheduler({
-    boss,
-    db,
-    logger,
-    config: configObj,
-    instanceId
-  });
-
   const app = await buildServer({ config: configObj, logger, boss, db, supabase });
   await app.listen({ port: configObj.port, host: "0.0.0.0" });
 
@@ -177,7 +157,6 @@ async function start() {
 
   const shutdown = async () => {
     logger.info("Shutting down...");
-    stopRecovery();
     await app.close();
     await boss.stop();
     await db.end();

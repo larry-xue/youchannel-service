@@ -442,6 +442,7 @@ export async function buildServer(params: {
     const result = await enqueueAnalyses({
       boss,
       db,
+      config,
       userId,
       model: config.geminiModel,
       candidates
@@ -531,6 +532,7 @@ export async function buildServer(params: {
     const result = await enqueueAnalyses({
       boss,
       db,
+      config,
       userId,
       model: config.geminiModel,
       candidates

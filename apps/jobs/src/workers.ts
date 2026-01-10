@@ -1,4 +1,4 @@
-import type { JobWithMetadata, PgBoss } from "pg-boss";
+import type { Job, PgBoss } from "pg-boss";
 import type { Logger } from "pino";
 import { chat, type StreamChunk } from "@tanstack/ai";
 import { createGeminiChat } from "@tanstack/ai-gemini";
@@ -222,9 +222,7 @@ const ANALYSIS_PROMPT_BASE = [
 ].join("\n");
 
 const ANALYSIS_STATUS = {
-  queued: "queued",
   pending: "pending",
-  processing: "processing",
   completed: "completed",
   failed: "failed",
   skipped: "skipped"
@@ -232,16 +230,10 @@ const ANALYSIS_STATUS = {
 
 type AnalysisStatus = (typeof ANALYSIS_STATUS)[keyof typeof ANALYSIS_STATUS];
 
-const ANALYSIS_MUTABLE_STATUSES: AnalysisStatus[] = [
-  ANALYSIS_STATUS.queued,
-  ANALYSIS_STATUS.pending,
-  ANALYSIS_STATUS.failed
-];
-
 type AnalyzeVideoPayload = {
   videoId: string;
   userId: string;
-  analysisId?: string; // Optional: provided by recovery or initial enqueue
+  analysisId?: string;
 };
 
 type VideoAnalysisTarget = {
@@ -257,8 +249,6 @@ type VideoAnalysisTarget = {
 type AnalysisRecord = {
   id: string;
   status: AnalysisStatus;
-  claimed_at: string | null;
-  failed_count: number;
 };
 
 type CharacterEvidence = {
@@ -303,7 +293,7 @@ type AnalysisOutput = {
 
 type GeminiModel = Parameters<typeof createGeminiChat>[0];
 
-function normalizeJobList<T>(jobs: JobWithMetadata<T>[] | JobWithMetadata<T>) {
+function normalizeJobList<T>(jobs: Job<T>[] | Job<T>) {
   return Array.isArray(jobs) ? jobs : [jobs];
 }
 
@@ -463,19 +453,6 @@ async function collectStream(stream: AsyncIterable<StreamChunk>) {
   return { content: content.trim(), usage };
 }
 
-function parseTimestampToMs(value?: string | null) {
-  if (!value) return null;
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function isProcessingStale(record: AnalysisRecord | null, config: Config) {
-  if (!record || record.status !== ANALYSIS_STATUS.processing) return false;
-  const claimedAtMs = parseTimestampToMs(record.claimed_at);
-  if (claimedAtMs === null) return false;
-  return Date.now() - claimedAtMs > config.analysisProcessingTimeoutMs;
-}
-
 const RETRYABLE_ERROR_CODES = new Set([
   "ETIMEDOUT",
   "ECONNRESET",
@@ -539,7 +516,7 @@ async function fetchVideoForAnalysis(db: DbPool, videoId: string) {
 
 async function fetchAnalysisRecord(db: DbPool, videoId: string) {
   const result = await db.query<AnalysisRecord>(
-    `select id, status, claimed_at, failed_count
+    `select id, status
      from video_analyses
      where video_id = $1
      limit 1`,
@@ -548,7 +525,11 @@ async function fetchAnalysisRecord(db: DbPool, videoId: string) {
   return result.rows[0] ?? null;
 }
 
-async function upsertVideoAnalysisIfStatus(
+/**
+ * Create or update analysis record for a video.
+ * Uses INSERT ... ON CONFLICT to handle concurrent requests atomically.
+ */
+async function upsertVideoAnalysis(
   db: DbPool,
   params: {
     videoId: string;
@@ -559,19 +540,8 @@ async function upsertVideoAnalysisIfStatus(
     usage: Record<string, unknown> | null;
     error: string | null;
     skipReason: string | null;
-    allowedStatuses: AnalysisStatus[];
-    instanceId?: string;
-    processingTimeoutMs?: number;
   }
 ) {
-  // For processing status, set claimed_at and claimed_by
-  const isProcessing = params.status === ANALYSIS_STATUS.processing;
-  const claimedBy = isProcessing && params.instanceId ? params.instanceId : null;
-  const timeoutMs = params.processingTimeoutMs ?? 15 * 60 * 1000; // Default 15 min
-
-  // P1-2 FIX: Move stale check into SQL WHERE clause to prevent race condition
-  // This ensures atomic check-and-update: only claim if status is allowed AND 
-  // either not processing OR processing but stale (claimed_at exceeded timeout)
   const result = await db.query<{ id: string; status: AnalysisStatus }>(
     `insert into video_analyses (
        video_id,
@@ -581,10 +551,8 @@ async function upsertVideoAnalysisIfStatus(
        usage,
        status,
        error,
-       skip_reason,
-       claimed_at,
-       claimed_by
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $6 = 'processing' THEN NOW() ELSE NULL END, $9)
+       skip_reason
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8)
      on conflict (video_id)
      do update set
        user_id = excluded.user_id,
@@ -594,15 +562,7 @@ async function upsertVideoAnalysisIfStatus(
        status = excluded.status,
        error = excluded.error,
        skip_reason = excluded.skip_reason,
-       claimed_at = CASE WHEN excluded.status = 'processing' THEN NOW() ELSE NULL END,
-       claimed_by = $9
-     where video_analyses.status = any($10::text[])
-       and (
-         excluded.status <> 'processing'
-         or video_analyses.status <> 'processing'
-         or video_analyses.claimed_at IS NULL
-         or video_analyses.claimed_at < NOW() - ($11 * interval '1 millisecond')
-       )
+       updated_at = NOW()
      returning id, status`,
     [
       params.videoId,
@@ -612,16 +572,16 @@ async function upsertVideoAnalysisIfStatus(
       params.usage,
       params.status,
       params.error,
-      params.skipReason,
-      claimedBy,
-      params.allowedStatuses,
-      timeoutMs
+      params.skipReason
     ]
   );
 
   return result.rows[0] ?? null;
 }
 
+/**
+ * Update an existing analysis record by ID.
+ */
 async function updateVideoAnalysis(db: DbPool, params: {
   id: string;
   status: AnalysisStatus;
@@ -630,15 +590,7 @@ async function updateVideoAnalysis(db: DbPool, params: {
   usage: Record<string, unknown> | null;
   error: string | null;
   skipReason: string | null;
-  failedCountUpdate?: "increment" | "reset";
 }) {
-  const failedCountExpression =
-    params.failedCountUpdate === "increment"
-      ? "failed_count + 1"
-      : params.failedCountUpdate === "reset"
-        ? "0"
-        : "failed_count";
-
   await db.query(
     `update video_analyses
      set analysis_text = $1,
@@ -647,7 +599,6 @@ async function updateVideoAnalysis(db: DbPool, params: {
          status = $4,
          error = $5,
          skip_reason = $6,
-         failed_count = ${failedCountExpression},
          updated_at = NOW()
      where id = $7`,
     [
@@ -774,22 +725,24 @@ export async function registerWorkers(params: {
   config: Config;
   instanceId: string;
 }) {
-  const { boss, db, logger, config, instanceId } = params;
+  const { boss, db, logger, config } = params;
 
   // Ensure queue exists before registering worker
   await boss.createQueue("analyze.video");
 
-  const handleAnalyzeVideoJob = async (job: any) => {
-    const payload = job.data as AnalyzeVideoPayload | null;
+  const handleAnalyzeVideoJob = async (job: Job<AnalyzeVideoPayload>) => {
+    const payload = job.data;
     const videoId = payload?.videoId;
     const userId = payload?.userId;
+    const retryCount = (job as any).retryCount ?? 0;
+    const maxRetries = config.analysisJobRetryLimit;
 
     if (!videoId || !userId) {
       logger.error({ jobId: job.id }, "analyze.video missing required payload");
       throw new Error("analyze.video missing required payload");
     }
 
-    logger.info({ jobId: job.id, videoId, userId }, "Analyze video started");
+    logger.info({ jobId: job.id, videoId, userId, retryCount }, "Analyze video started");
 
     const video = await fetchVideoForAnalysis(db, videoId);
     if (!video) {
@@ -809,23 +762,16 @@ export async function registerWorkers(params: {
       return { status: ANALYSIS_STATUS.skipped, reason: "payload_mismatch" };
     }
 
+    // Check if analysis already exists and is completed/skipped
     const existing = await fetchAnalysisRecord(db, videoId);
-    const processingStale = isProcessingStale(existing, config);
-    const reclaimableStatuses = processingStale
-      ? [...ANALYSIS_MUTABLE_STATUSES, ANALYSIS_STATUS.processing]
-      : ANALYSIS_MUTABLE_STATUSES;
-
-    if (existing?.status === ANALYSIS_STATUS.processing && !processingStale) {
-      logger.info({ videoId, analysisId: existing.id }, "Analyze video skipped; already processing");
-      return { status: ANALYSIS_STATUS.processing, analysisId: existing.id, reason: "analysis_in_progress" };
-    }
-    if (processingStale) {
-      logger.warn({ videoId, analysisId: existing?.id }, "Analyze video reclaiming stale processing");
+    if (existing && (existing.status === ANALYSIS_STATUS.completed || existing.status === ANALYSIS_STATUS.skipped)) {
+      logger.info({ videoId, analysisId: existing.id, status: existing.status }, "Analyze video skipped; already handled");
+      return { status: existing.status, analysisId: existing.id, reason: "analysis_exists" };
     }
 
     const durationSec = parseDurationToSeconds(video.duration);
     if (durationSec === null || durationSec <= 0) {
-      const skipped = await upsertVideoAnalysisIfStatus(db, {
+      const skipped = await upsertVideoAnalysis(db, {
         videoId,
         userId,
         status: ANALYSIS_STATUS.skipped,
@@ -833,40 +779,28 @@ export async function registerWorkers(params: {
         analysisText: "Skipped: duration_invalid",
         usage: null,
         error: null,
-        skipReason: "duration_invalid",
-        allowedStatuses: reclaimableStatuses
+        skipReason: "duration_invalid"
       });
-      if (!skipped) {
-        const current = await fetchAnalysisRecord(db, videoId);
-        logger.info({ videoId, analysisId: current?.id }, "Analyze video skipped; already handled");
-        return { status: current?.status ?? ANALYSIS_STATUS.skipped, analysisId: current?.id, reason: "analysis_exists" };
-      }
-      logger.info({ videoId, analysisId: skipped.id }, "Analyze video skipped; duration invalid");
-      return { status: ANALYSIS_STATUS.skipped, reason: "duration_invalid", analysisId: skipped.id };
+      logger.info({ videoId, analysisId: skipped?.id }, "Analyze video skipped; duration invalid");
+      return { status: ANALYSIS_STATUS.skipped, reason: "duration_invalid", analysisId: skipped?.id };
     }
 
     const model = config.geminiModel;
-    const claimed = await upsertVideoAnalysisIfStatus(db, {
+    
+    // Create/update analysis record to pending status
+    const claimed = await upsertVideoAnalysis(db, {
       videoId,
       userId,
-      status: ANALYSIS_STATUS.processing,
+      status: ANALYSIS_STATUS.pending,
       model,
       analysisText: "",
       usage: null,
       error: null,
-      skipReason: null,
-      allowedStatuses: reclaimableStatuses,
-      instanceId,
-      processingTimeoutMs: config.analysisProcessingTimeoutMs
+      skipReason: null
     });
 
     if (!claimed) {
-      const current = await fetchAnalysisRecord(db, videoId);
-      if (current) {
-        logger.info({ videoId, analysisId: current.id, status: current.status }, "Analyze video skipped; already handled");
-        return { status: current.status, analysisId: current.id, reason: "analysis_exists" };
-      }
-      logger.warn({ videoId }, "Analyze video skipped; failed to claim analysis record");
+      logger.warn({ videoId }, "Analyze video skipped; failed to create analysis record");
       return { status: ANALYSIS_STATUS.skipped, reason: "analysis_record_missing" };
     }
 
@@ -901,8 +835,7 @@ export async function registerWorkers(params: {
         analysisText: errorMessage,
         usage: null,
         error: errorMessage,
-        skipReason: null,
-        failedCountUpdate: "increment"
+        skipReason: null
       });
       await refundQuota("config_missing");
       logger.error({ videoId, analysisId }, errorMessage);
@@ -946,22 +879,12 @@ export async function registerWorkers(params: {
         );
         return { status: ANALYSIS_STATUS.skipped, analysisId, reason: "quota_exceeded" };
       } else {
-        // System failure: mark as failed and throw for retry
-        await updateVideoAnalysis(db, {
-          id: analysisId,
-          status: ANALYSIS_STATUS.failed,
-          model,
-          analysisText: "Failed: quota_system_error",
-          usage: null,
-          error: errorMessage,
-          skipReason: null,
-          failedCountUpdate: "increment"
-        });
+        // System failure: throw for pg-boss retry
         logger.error(
           { videoId, analysisId, err: error, errorMessage },
           "Analyze video failed; quota system error"
         );
-        throw error; // Let pg-boss retry
+        throw error;
       }
     }
 
@@ -980,6 +903,14 @@ export async function registerWorkers(params: {
       usage = result.usage ?? null;
     } catch (error) {
       const { message, status, retryable } = classifyGeminiError(error);
+      
+      if (retryable && retryCount < maxRetries) {
+        // Let pg-boss handle the retry - keep status as pending
+        logger.warn({ videoId, analysisId, status, retryCount, maxRetries, errorMessage: message }, "Analyze video retryable error; will retry");
+        throw error;
+      }
+      
+      // Terminal failure - either not retryable or retries exhausted
       await updateVideoAnalysis(db, {
         id: analysisId,
         status: ANALYSIS_STATUS.failed,
@@ -987,36 +918,11 @@ export async function registerWorkers(params: {
         analysisText: message,
         usage: null,
         error: message,
-        skipReason: null,
-        failedCountUpdate: "increment"
+        skipReason: null
       });
-      
-      if (retryable) {
-        // Check if retries are exhausted
-        const current = await fetchAnalysisRecord(db, videoId);
-        const failedCount = current?.failed_count ?? 0;
-        const maxRetries = config.analysisMaxRetryCount;
-        
-        if (failedCount >= maxRetries) {
-          // Retries exhausted - do terminal refund
-          await refundQuota("retries_exhausted");
-          logger.error(
-            { videoId, analysisId, failedCount, maxRetries, errorMessage: message },
-            "Analyze video retries exhausted; refunding quota"
-          );
-          return { status: ANALYSIS_STATUS.failed, analysisId, error: message, reason: "retries_exhausted" };
-        }
-        
-        // P0-1 FIX: Don't refund on retryable errors - the job will be retried
-        // with the same idempotency key, so quota is preserved for the retry
-        logger.warn({ videoId, analysisId, status, failedCount, errorMessage: message }, "Analyze video retryable error");
-        throw error;
-      }
-      
-      // Only refund for non-retryable (terminal) errors
-      await refundQuota("gemini_error");
+      await refundQuota(retryCount >= maxRetries ? "retries_exhausted" : "gemini_error");
       captureException(error);
-      logger.error({ videoId, analysisId, err: error, errorMessage: message }, "Analyze video failed");
+      logger.error({ videoId, analysisId, err: error, errorMessage: message, retryCount }, "Analyze video failed");
       return { status: ANALYSIS_STATUS.failed, analysisId, error: message };
     }
 
@@ -1025,6 +931,17 @@ export async function registerWorkers(params: {
       parsed = parseAnalysisOutput(responseText);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "invalid_analysis_output";
+      
+      if (retryCount < maxRetries) {
+        // Invalid output is retryable - model might return valid JSON on retry
+        logger.warn(
+          { videoId, analysisId, retryCount, maxRetries, errorMessage },
+          "Analyze video response invalid; will retry"
+        );
+        throw error;
+      }
+      
+      // Retries exhausted
       await updateVideoAnalysis(db, {
         id: analysisId,
         status: ANALYSIS_STATUS.failed,
@@ -1032,33 +949,15 @@ export async function registerWorkers(params: {
         analysisText: responseText || errorMessage,
         usage,
         error: errorMessage,
-        skipReason: null,
-        failedCountUpdate: "increment"
+        skipReason: null
       });
-      
-      // Check if retries are exhausted
-      const current = await fetchAnalysisRecord(db, videoId);
-      const failedCount = current?.failed_count ?? 0;
-      const maxRetries = config.analysisMaxRetryCount;
-      
-      if (failedCount >= maxRetries) {
-        // Retries exhausted - do terminal refund
-        await refundQuota("retries_exhausted");
-        captureException(error);
-        logger.error(
-          { videoId, analysisId, failedCount, maxRetries, errorMessage },
-          "Analyze video invalid output retries exhausted; refunding quota"
-        );
-        return { status: ANALYSIS_STATUS.failed, analysisId, error: errorMessage, reason: "retries_exhausted" };
-      }
-      
-      // P0-1 FIX: Invalid output is retryable (model might return valid JSON on retry)
-      // Don't refund - throw to trigger retry instead
-      logger.warn(
-        { videoId, analysisId, failedCount, errorMessage },
-        "Analyze video response invalid; will retry"
+      await refundQuota("retries_exhausted");
+      captureException(error);
+      logger.error(
+        { videoId, analysisId, retryCount, maxRetries, errorMessage },
+        "Analyze video invalid output retries exhausted; refunding quota"
       );
-      throw error;
+      return { status: ANALYSIS_STATUS.failed, analysisId, error: errorMessage, reason: "retries_exhausted" };
     }
 
     await updateVideoAnalysis(db, {
@@ -1068,16 +967,15 @@ export async function registerWorkers(params: {
       analysisText: JSON.stringify(parsed),
       usage,
       error: null,
-      skipReason: null,
-      failedCountUpdate: "reset"
+      skipReason: null
     });
 
     logger.info({ videoId, analysisId, model }, "Analyze video completed");
     return { status: ANALYSIS_STATUS.completed, analysisId };
   };
 
-  await boss.work("analyze.video", async (jobs: any) => {
-    const jobList = normalizeJobList(jobs ?? []);
+  await boss.work<AnalyzeVideoPayload>("analyze.video", async (jobs) => {
+    const jobList = normalizeJobList(jobs);
     if (jobList.length === 0) {
       logger.error("Analyze video worker received empty job batch");
       return { status: ANALYSIS_STATUS.failed, reason: "job_missing" };
