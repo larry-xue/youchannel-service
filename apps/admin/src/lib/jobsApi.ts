@@ -329,3 +329,49 @@ export function fetchVideoAnalyses(token: string, videoId: string) {
   return request<{ analyses: VideoAnalysisRow[] }>(`/admin/videos/${videoId}/analyses`, token);
 }
 
+// PG-Boss Job Monitoring types
+export type JobQueueStats = {
+  queueName: string;
+  stats: Record<string, number>;
+  total: number;
+};
+
+export type JobRow = {
+  id: string;
+  name: string;
+  state: string;
+  data: Record<string, unknown> | null;
+  output: Record<string, unknown> | null;
+  created_on: string;
+  started_on: string | null;
+  completed_on: string | null;
+  retry_count: number;
+};
+
+export type JobListParams = {
+  state?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type JobListResponse = {
+  rows: JobRow[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+// PG-Boss Job Monitoring API functions
+export function fetchJobStats(token: string) {
+  return request<JobQueueStats>("/admin/jobs", token);
+}
+
+export function fetchJobList(token: string, params?: JobListParams) {
+  const searchParams = new URLSearchParams();
+  if (params?.state) searchParams.set("state", params.state);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  const suffix = searchParams.toString();
+  const path = suffix ? `/admin/jobs/list?${suffix}` : "/admin/jobs/list";
+  return request<JobListResponse>(path, token);
+}

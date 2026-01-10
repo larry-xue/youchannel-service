@@ -66,8 +66,14 @@ const quotasRoute = createRoute({
   })
 });
 
+const jobsRoute = createRoute({
+  getParentRoute: () => authRoute,
+  path: "jobs",
+  component: Dashboard
+});
+
 const routeTree = rootRoute.addChildren([
-  authRoute.addChildren([dashboardRoute, systemUsersRoute, adminUsersRoute, videosRoute, videoAnalysesRoute, quotasRoute])
+  authRoute.addChildren([dashboardRoute, systemUsersRoute, adminUsersRoute, videosRoute, videoAnalysesRoute, quotasRoute, jobsRoute])
 ]);
 
 export const router = createRouter({

@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 
-import { Film, LogOut, Shield, Users, Coins, ChevronDown } from "lucide-react";
+import { Film, LogOut, Shield, Users, Coins, ChevronDown, Activity } from "lucide-react";
 
 type NavItem = {
   title: string;
@@ -58,6 +58,12 @@ export function AdminHeader() {
       icon: Coins,
       search: { userId: undefined },
       matchPrefix: ["/quotas"],
+    },
+    {
+      title: "任务监控",
+      to: "/jobs",
+      icon: Activity,
+      matchPrefix: ["/jobs"],
     }
   ];
 
@@ -69,32 +75,31 @@ export function AdminHeader() {
   };
 
   const renderNavItem = (item: NavItem) => {
-      const active = isActive(item);
-      const styleClass = `text-sm font-medium transition-colors hover:text-primary ${
-        active ? "text-foreground" : "text-muted-foreground"
+    const active = isActive(item);
+    const styleClass = `text-sm font-medium transition-colors hover:text-primary ${active ? "text-foreground" : "text-muted-foreground"
       }`;
 
     if (item.children) {
       return (
         <DropdownMenu key={item.title}>
           <DropdownMenuTrigger className={`flex items-center gap-2 outline-none ${styleClass}`}>
-             {item.icon && <item.icon className="h-4 w-4" />}
-             <span>{item.title}</span>
-             <ChevronDown className="h-3 w-3" />
+            {item.icon && <item.icon className="h-4 w-4" />}
+            <span>{item.title}</span>
+            <ChevronDown className="h-3 w-3" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-              {item.children.map(child => (
-                  <DropdownMenuItem key={child.title} asChild>
-                    <Link
-                        to={child.to!}
-                        search={child.search}
-                        className="w-full cursor-pointer"
-                    >
-                         {child.icon && <child.icon className="mr-2 h-4 w-4" />}
-                        {child.title}
-                    </Link>
-                  </DropdownMenuItem>
-              ))}
+            {item.children.map(child => (
+              <DropdownMenuItem key={child.title} asChild>
+                <Link
+                  to={child.to!}
+                  search={child.search}
+                  className="w-full cursor-pointer"
+                >
+                  {child.icon && <child.icon className="mr-2 h-4 w-4" />}
+                  {child.title}
+                </Link>
+              </DropdownMenuItem>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
       );
@@ -128,11 +133,11 @@ export function AdminHeader() {
       </nav>
       <div className="ml-auto flex items-center gap-4">
         <div className="flex flex-col items-end hidden sm:flex">
-            <span className="text-sm font-medium leading-none">{session?.user.email ?? "管理员用户"}</span>
-            <span className="text-xs text-muted-foreground">管理员</span>
+          <span className="text-sm font-medium leading-none">{session?.user.email ?? "管理员用户"}</span>
+          <span className="text-xs text-muted-foreground">管理员</span>
         </div>
         <Button variant="ghost" size="icon" onClick={() => supabase.auth.signOut()} title="退出登录">
-            <LogOut className="h-5 w-5" />
+          <LogOut className="h-5 w-5" />
         </Button>
       </div>
     </header>

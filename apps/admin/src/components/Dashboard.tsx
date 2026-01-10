@@ -4,8 +4,9 @@ import { AdminUsers } from "./AdminUsers";
 import { SystemUsers } from "./SystemUsers";
 import { Videos } from "./Videos";
 import { QuotaManagement } from "./QuotaManagement";
+import { JobMonitor } from "./JobMonitor";
 
-type Tab = "system-users" | "admin-users" | "videos" | "quotas";
+type Tab = "system-users" | "admin-users" | "videos" | "quotas" | "jobs";
 
 export function Dashboard() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -18,7 +19,9 @@ export function Dashboard() {
           ? "videos"
           : pathname.startsWith("/quotas")
             ? "quotas"
-            : "system-users";
+            : pathname.startsWith("/jobs")
+              ? "jobs"
+              : "system-users";
 
   const tabCopy: Record<Tab, { title: string; description: string }> = {
     "system-users": {
@@ -36,6 +39,10 @@ export function Dashboard() {
     quotas: {
       title: "配额管理",
       description: "查看和管理用户配额，添加授权，发起退款。"
+    },
+    jobs: {
+      title: "任务监控",
+      description: "查看 pg-boss 任务队列状态，监控分析任务执行情况。"
     }
   };
   const activeCopy = tabCopy[activeTab];
@@ -61,6 +68,8 @@ export function Dashboard() {
           <Videos />
         ) : activeTab === "quotas" ? (
           <QuotaManagement />
+        ) : activeTab === "jobs" ? (
+          <JobMonitor />
         ) : (
           <SystemUsers />
         )}
