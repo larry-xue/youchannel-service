@@ -38,7 +38,7 @@ export function registerAdminVideoRoutes(app: FastifyInstance, deps: Deps) {
     }
 
     const rows = await listAdminVideos(deps.db, {
-      userId,
+      userId: userId ?? "",
       limit: limit ?? 50,
       offset: offset ?? 0
     });
