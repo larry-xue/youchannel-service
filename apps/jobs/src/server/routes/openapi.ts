@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { PgBoss } from "pg-boss";
 import type { Config } from "@jobs/config.js";
 import type { DbPool } from "@jobs/db.js";
@@ -140,7 +140,7 @@ type Deps = {
   boss: PgBoss;
   db: DbPool;
   config: Config;
-  requireServiceKey: (request: unknown, reply: unknown) => Promise<void> | void;
+  requireServiceKey: (request: FastifyRequest, reply: FastifyReply) => Promise<void> | void;
 };
 
 export function registerOpenApiRoutes(app: FastifyInstance, deps: Deps) {

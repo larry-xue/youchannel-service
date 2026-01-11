@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import {
   parseLimit,
@@ -129,7 +129,7 @@ function buildAccountSummary(row: YoutubeAccountRow): YoutubeAccountSummary {
 
 type Deps = {
   supabase: SupabaseClient;
-  requireAdmin: (request: unknown, reply: unknown) => Promise<void> | void;
+  requireAdmin: (request: FastifyRequest, reply: FastifyReply) => Promise<void> | void;
 };
 
 export function registerAdminSystemUserRoutes(app: FastifyInstance, deps: Deps) {

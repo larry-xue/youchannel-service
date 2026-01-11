@@ -1,10 +1,10 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { DbPool } from "@jobs/db.js";
 import { parseLimit, parseOffset, parseOptionalQueryString } from "@jobs/server/utils.js";
 
 type Deps = {
   db: DbPool;
-  requireAdmin: (request: unknown, reply: unknown) => Promise<void> | void;
+  requireAdmin: (request: FastifyRequest, reply: FastifyReply) => Promise<void> | void;
 };
 
 export function registerAdminJobRoutes(app: FastifyInstance, deps: Deps) {

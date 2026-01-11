@@ -1,6 +1,7 @@
 import type { PgBoss } from "pg-boss";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
+import type { FastifyInstance } from "fastify";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
@@ -28,7 +29,7 @@ export async function buildServer(params: {
   const app = Fastify({
     logger,
     bodyLimit: 1048576 // 1MB default, but allow empty body
-  });
+  }) as unknown as FastifyInstance;
 
   await app.register(cors, {
     origin: process.env.NODE_ENV === "production" ? false : "*",

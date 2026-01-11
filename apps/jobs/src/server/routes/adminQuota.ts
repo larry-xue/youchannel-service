@@ -1,10 +1,10 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseLimit, parseOptionalString, parseRequiredString } from "@jobs/server/utils.js";
 
 type Deps = {
   supabase: SupabaseClient;
-  requireAdmin: (request: unknown, reply: unknown) => Promise<void> | void;
+  requireAdmin: (request: FastifyRequest, reply: FastifyReply) => Promise<void> | void;
 };
 
 export function registerAdminQuotaRoutes(app: FastifyInstance, deps: Deps) {
