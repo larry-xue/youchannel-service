@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { PgBoss } from "pg-boss";
-import type { Config } from "@jobs/config.js";
-import type { DbPool } from "@jobs/db.js";
-import { enqueueAnalyses } from "@jobs/analysis.js";
-import { parseRequiredString } from "@jobs/server/utils.js";
+import type { Config } from "../../config.js";
+import type { DbPool } from "../../db.js";
+import { enqueueAnalyses } from "../../analysis.js";
+import { parseRequiredString } from "../utils.js";
 
 type OpenApiVideoInput = {
   youtubeVideoId: string;
