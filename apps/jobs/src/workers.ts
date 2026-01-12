@@ -81,12 +81,23 @@ const ANALYSIS_OUTPUT_SCHEMA = {
           speaking_style: {
             type: "string",
             minLength: 1,
-            description: "Description of how the character speaks."
+            description: "Description of how the character speaks, including accent, speaking pace (slow/moderate/fast), tone, pitch, energy level, and any distinctive speech patterns."
           },
           notable_topics: {
             type: "array",
             items: { type: "string" },
             description: "Topics the character discusses."
+          },
+          voice: {
+            type: "string",
+            enum: [
+              "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda",
+              "Orus", "Aoede", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus",
+              "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi",
+              "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima",
+              "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+            ],
+            description: "Voice for TTS. Choose based on character's speaking style and personality. Voice tones: Zephyr=Bright, Puck=Upbeat, Charon=Informative, Kore=Firm, Fenrir=Excitable, Leda=Youthful, Orus=Firm, Aoede=Breezy, Callirrhoe=Easy-going, Autonoe=Bright, Enceladus=Breathy, Iapetus=Clear, Umbriel=Easy-going, Algieba=Smooth, Despina=Smooth, Erinome=Clear, Algenib=Gravelly, Rasalgethi=Informative, Laomedeia=Upbeat, Achernar=Soft, Alnilam=Firm, Schedar=Even, Gacrux=Mature, Pulcherrima=Forward, Achird=Friendly, Zubenelgenubi=Casual, Vindemiatrix=Gentle, Sadachbia=Lively, Sadaltager=Knowledgeable, Sulafat=Warm."
           },
           evidence: {
             type: "array",
@@ -112,7 +123,7 @@ const ANALYSIS_OUTPUT_SCHEMA = {
             description: "1-3 short quotes with timestamps."
           }
         },
-        required: ["name", "kind", "description", "traits", "speaking_style", "notable_topics", "evidence"]
+        required: ["name", "kind", "description", "traits", "speaking_style", "notable_topics", "evidence", "voice"]
       },
       maxItems: 8,
       description: "0-8 main characters/speakers in the video."
@@ -189,6 +200,7 @@ const ANALYSIS_PROMPT_BASE = [
   "    \"speaking_style\": string,",
   "    \"notable_topics\": [string],",
   "    \"evidence\": [{\"timestamp\": string, \"quote\": string}],",
+  "    \"voice\": string",
   "  }],",
   "  \"transcript\": {",
   "    \"language\": string,",
@@ -220,6 +232,12 @@ const ANALYSIS_PROMPT_BASE = [
   "- If name is unknown, use \"Unknown Speaker 1\", \"Unknown Speaker 2\", etc.",
   "- \"traits\": 2-6 short tags.",
   "- \"evidence\": 1-3 short quotes (<= 20 words each) with timestamps.",
+  "- \"voice\": Choose the best matching voice for TTS based on the character's personality and speaking style.",
+  "  Available voices (Name -- Tone): Zephyr--Bright, Puck--Upbeat, Charon--Informative, Kore--Firm, Fenrir--Excitable, Leda--Youthful,",
+  "  Orus--Firm, Aoede--Breezy, Callirrhoe--Easy-going, Autonoe--Bright, Enceladus--Breathy, Iapetus--Clear,",
+  "  Umbriel--Easy-going, Algieba--Smooth, Despina--Smooth, Erinome--Clear, Algenib--Gravelly, Rasalgethi--Informative,",
+  "  Laomedeia--Upbeat, Achernar--Soft, Alnilam--Firm, Schedar--Even, Gacrux--Mature, Pulcherrima--Forward,",
+  "  Achird--Friendly, Zubenelgenubi--Casual, Vindemiatrix--Gentle, Sadachbia--Lively, Sadaltager--Knowledgeable, Sulafat--Warm.",
   "",
   "\"transcript\":",
   "- \"segments\" must be chronological.",
@@ -268,6 +286,7 @@ type AnalysisCharacter = {
   speaking_style: string;
   notable_topics: string[];
   evidence: CharacterEvidence[];
+  voice: string;
 };
 
 type TranscriptSegment = {
@@ -398,6 +417,7 @@ function isValidAnalysisOutput(value: unknown): value is AnalysisOutput {
     if (typeof char.speaking_style !== "string") return false;
     if (!Array.isArray(char.notable_topics)) return false;
     if (!Array.isArray(char.evidence)) return false;
+    if (typeof char.voice !== "string") return false;
   }
 
   // Validate transcript
