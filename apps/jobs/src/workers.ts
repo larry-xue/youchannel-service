@@ -19,12 +19,6 @@ const VALID_VOICES = new Set([
 ]);
 const DEFAULT_VOICE = "Puck";
 
-const VALID_LANGUAGES = new Set([
-  "ar-EG", "de-DE", "en-US", "es-US", "fr-FR", "hi-IN",
-  "id-ID", "it-IT", "ja-JP", "ko-KR", "pt-BR", "ru-RU",
-  "nl-NL", "pl-PL", "th-TH", "tr-TR", "vi-VN", "ro-RO",
-  "uk-UA", "bn-BD", "en-IN", "mr-IN", "ta-IN", "te-IN"
-]);
 const DEFAULT_LANGUAGE = "en-US";
 // eslint-disable-next-line @typescript-eslint/naming-convention
 const ANALYSIS_OUTPUT_SCHEMA = {
@@ -107,12 +101,6 @@ const ANALYSIS_OUTPUT_SCHEMA = {
           },
           language: {
             type: "string",
-            enum: [
-              "ar-EG", "de-DE", "en-US", "es-US", "fr-FR", "hi-IN",
-              "id-ID", "it-IT", "ja-JP", "ko-KR", "pt-BR", "ru-RU",
-              "nl-NL", "pl-PL", "th-TH", "tr-TR", "vi-VN", "ro-RO",
-              "uk-UA", "bn-BD", "en-IN", "mr-IN", "ta-IN", "te-IN"
-            ],
           },
         },
         required: ["name", "kind", "description", "traits", "speaking_style", "notable_topics", "voice", "language"]
@@ -178,7 +166,6 @@ const ANALYSIS_PROMPT_BASE = [
   "Do not include any extra keys, markdown, code fences, comments, or surrounding text.",
   "",
   "General rules:",
-  "- Write all narrative text (summaries, descriptions, details, traits) in English.",
   "- Do not invent facts.",
   "",
   "\"scene\":",
@@ -204,15 +191,18 @@ const ANALYSIS_PROMPT_BASE = [
   "  Umbriel--Easy-going, Algieba--Smooth, Despina--Smooth, Erinome--Clear, Algenib--Gravelly, Rasalgethi--Informative,",
   "  Laomedeia--Upbeat, Achernar--Soft, Alnilam--Firm, Schedar--Even, Gacrux--Mature, Pulcherrima--Forward,",
   "  Achird--Friendly, Zubenelgenubi--Casual, Vindemiatrix--Gentle, Sadachbia--Lively, Sadaltager--Knowledgeable, Sulafat--Warm.",
-  "- \"language\": BCP-47 code of the detected spoken language",
-  "  Supported: ar-EG=Arabic (Egypt), de-DE=German (Germany), en-US=English (United States), es-US=Spanish (United States), fr-FR=French (France), hi-IN=Hindi (India), id-ID=Indonesian (Indonesia), it-IT=Italian (Italy), ja-JP=Japanese (Japan), ko-KR=Korean (South Korea), pt-BR=Portuguese (Brazil), ru-RU=Russian (Russia), nl-NL=Dutch (Netherlands), pl-PL=Polish (Poland), th-TH=Thai (Thailand), tr-TR=Turkish (Turkey), vi-VN=Vietnamese (Vietnam), ro-RO=Romanian (Romania), uk-UA=Ukrainian (Ukraine), bn-BD=Bengali (Bangladesh), en-IN=English (India), mr-IN=Marathi (India), ta-IN=Telugu (India), te-IN=Telugu (India).",
-  "\"transcript\":",
-  "- \"segments\" must be chronological.",
-  "- \"start\" and \"end\" timestamps must match the same timestamp regex.",
-  "- Keep each \"text\" concise (1-2 sentences).",
-  "- Return as much transcript as possible within the output limit.",
-  "- If not all transcript can be returned, set \"is_truncated\" to true and set a non-empty \"cursor\" that can be used to continue from where you stopped.",
-  "- If all transcript is covered, set \"is_truncated\" to false and set \"cursor\" to \"\"."
+  `- "language":`,
+  ` - Pick the BCP-47 code that matches what this character ACTUALLY SPEAKS in the video.`,
+  ` - DO NOT default to "en-US".`,
+  ` - Use "en-US" ONLY if the character clearly speaks American English.`,
+  `"transcript":`,
+  `- The transcript must be in the ORIGINAL SPOKEN LANGUAGE of the video. Do NOT translate.`,
+  `- "segments" must be chronological.`,
+  `- "start" and "end" timestamps must match the same timestamp regex.`,
+  `- Keep each "text" concise (1-2 sentences).`,
+  `- Return as much transcript as possible within the output limit.`,
+  `- If not all transcript can be returned, set "is_truncated" to true and set a non-empty "cursor" that can be used to continue from where you stopped.`,
+  `- If all transcript is covered, set "is_truncated" to false and set "cursor" to "".`,
 ].join("\n");
 
 const ANALYSIS_STATUS = {
@@ -383,9 +373,7 @@ function isValidAnalysisOutput(value: unknown): value is AnalysisOutput {
       char.voice = DEFAULT_VOICE;
     }
     if (typeof char.language !== "string") return false;
-    if (!VALID_LANGUAGES.has(char.language)) {
-      char.language = DEFAULT_LANGUAGE;
-    }
+    if (typeof char.language !== "string") return false;
   }
 
   // Validate transcript
