@@ -681,6 +681,17 @@ async function generateGeminiAnalysis(params: {
   return collectStream(stream);
 }
 
+/**
+ * Get environment-specific queue name to prevent dev/test/prod queue conflicts.
+ * Only development environment gets a prefix to isolate local development.
+ */
+export function getQueueName(baseName: string, nodeEnv: string): string {
+  if (nodeEnv === "development") {
+    return `dev.${baseName}`;
+  }
+  return baseName;
+}
+
 export async function registerWorkers(params: {
   boss: PgBoss;
   db: DbPool;
@@ -689,9 +700,11 @@ export async function registerWorkers(params: {
   instanceId: string;
 }) {
   const { boss, db, logger, config } = params;
+  const queueName = getQueueName("analyze.video", config.nodeEnv);
 
   // Ensure queue exists before registering worker
-  await boss.createQueue("analyze.video");
+  await boss.createQueue(queueName);
+  logger.info({ queueName, nodeEnv: config.nodeEnv }, "Worker queue registered");
 
   const handleAnalyzeVideoJob = async (job: Job<AnalyzeVideoPayload>) => {
     const payload = job.data;
@@ -918,7 +931,7 @@ export async function registerWorkers(params: {
     return { status: ANALYSIS_STATUS.completed, analysisId };
   };
 
-  await boss.work<AnalyzeVideoPayload>("analyze.video", async (jobs) => {
+  await boss.work<AnalyzeVideoPayload>(queueName, async (jobs) => {
     const jobList = normalizeJobList(jobs);
     if (jobList.length === 0) {
       logger.error("Analyze video worker received empty job batch");

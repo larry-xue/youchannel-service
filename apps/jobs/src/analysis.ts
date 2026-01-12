@@ -1,6 +1,7 @@
 import type { PgBoss } from "pg-boss";
 import type { DbPool } from "./db.js";
 import type { Config } from "./config.js";
+import { getQueueName } from "./workers.js";
 
 export type AnalysisCandidate = {
   videoId: string;
@@ -202,8 +203,9 @@ export async function enqueueAnalyses(params: {
 
     const analysisId = queued.rows[0].id;
     // Send job to pg-boss with retry configuration
+    const queueName = getQueueName("analyze.video", params.config.nodeEnv);
     const bossJobId = await params.boss.send(
-      "analyze.video",
+      queueName,
       {
         videoId: candidate.videoId,
         userId: params.userId,
