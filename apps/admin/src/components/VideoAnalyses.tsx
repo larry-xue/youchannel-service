@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link } from "@tanstack/react-router";
 import { useAuth } from "../lib/auth";
-import { fetchVideoAnalyses, type VideoAnalysisRow } from "../lib/jobsApi";
+import { fetchVideoAnalyses, deleteAnalysis, type VideoAnalysisRow } from "../lib/jobsApi";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -12,10 +12,12 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { ArrowLeft, Eye, RefreshCw } from "lucide-react";
+import { useToast } from "../hooks/use-toast";
+import { ArrowLeft, Eye, RefreshCw, Trash2, AlertTriangle } from "lucide-react";
 import { useState } from "react";
 import JsonView from "react18-json-view";
 import "react18-json-view/src/style.css";
@@ -64,12 +66,38 @@ export function VideoAnalyses() {
   const { session } = useAuth();
   const token = session?.access_token;
   const { videoId } = useParams({ from: "/auth/videos/$videoId/analyses" });
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [detailDialog, setDetailDialog] = useState<DetailDialogData>(null);
+  const [deletingAnalysis, setDeletingAnalysis] = useState<VideoAnalysisRow | null>(null);
 
   const analysesQuery = useQuery({
     queryKey: ["video-analyses", videoId],
     enabled: Boolean(token) && Boolean(videoId),
     queryFn: () => fetchVideoAnalyses(token ?? "", videoId!)
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (analysisId: string) => {
+      if (!token) throw new Error("No token");
+      return deleteAnalysis(token, analysisId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["video-analyses", videoId] });
+      setDeletingAnalysis(null);
+      toast({
+        title: "删除成功",
+        description: "分析记录已删除",
+        type: "success"
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "删除失败",
+        description: String(error),
+        type: "error"
+      });
+    }
   });
 
   const analyses = analysesQuery.data?.analyses ?? [];
@@ -192,6 +220,15 @@ export function VideoAnalyses() {
                             错误
                           </Button>
                         )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeletingAnalysis(analysis)}
+                        >
+                          <Trash2 className="mr-1 h-3 w-3" />
+                          删除
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -223,6 +260,54 @@ export function VideoAnalyses() {
                 </pre>
               )}
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog open={!!deletingAnalysis} onOpenChange={(open) => !open && setDeletingAnalysis(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-5 w-5" />
+                删除分析记录
+              </DialogTitle>
+              <DialogDescription>
+                您确定要删除此分析记录吗？此操作无法撤销。
+              </DialogDescription>
+            </DialogHeader>
+
+            {deletingAnalysis && (
+              <div className="py-2 text-sm">
+                <p>状态: <span className="font-semibold">{translateStatus(deletingAnalysis.status)}</span></p>
+                <p>模型: <span className="font-semibold">{deletingAnalysis.model || "-"}</span></p>
+                <p>创建时间: <span className="font-semibold">{formatTime(deletingAnalysis.created_at)}</span></p>
+              </div>
+            )}
+
+            {deleteMutation.error && (
+              <Alert variant="destructive" className="my-2 p-2">
+                <div className="text-sm">
+                  {String(deleteMutation.error)}
+                </div>
+              </Alert>
+            )}
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setDeletingAnalysis(null)}
+                disabled={deleteMutation.isPending}
+              >
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => deletingAnalysis && deleteMutation.mutate(deletingAnalysis.id)}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? "正在删除..." : "确认删除"}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </CardContent>

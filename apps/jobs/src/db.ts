@@ -142,3 +142,14 @@ export async function fetchVideoAnalyses(
   );
   return result.rows;
 }
+
+export async function deleteVideoAnalysis(
+  pool: DbPool,
+  analysisId: string
+): Promise<boolean> {
+  const result = await pool.query(
+    `delete from video_analyses where id = $1`,
+    [analysisId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}

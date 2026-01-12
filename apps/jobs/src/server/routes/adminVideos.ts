@@ -3,7 +3,7 @@ import type { PgBoss } from "pg-boss";
 import type { Config } from "../../config.js";
 import type { DbPool } from "../../db.js";
 import { enqueueAnalyses, fetchAnalysisCandidates } from "../../analysis.js";
-import { listAdminVideos, fetchVideoAnalyses } from "../../db.js";
+import { listAdminVideos, fetchVideoAnalyses, deleteVideoAnalysis } from "../../db.js";
 import {
   parseLimit,
   parseOffset,
@@ -111,4 +111,25 @@ export function registerAdminVideoRoutes(app: FastifyInstance, deps: Deps) {
       skipReasons: result.skipReasons
     };
   });
+
+  app.delete(
+    "/admin/analyses/:analysisId",
+    { preHandler: deps.requireAdmin },
+    async (request, reply) => {
+      const { analysisId } = request.params as { analysisId: string };
+
+      if (!analysisId) {
+        reply.code(400);
+        return { error: "missing_analysis_id" };
+      }
+
+      const deleted = await deleteVideoAnalysis(deps.db, analysisId);
+      if (!deleted) {
+        reply.code(404);
+        return { error: "analysis_not_found" };
+      }
+
+      return { success: true };
+    }
+  );
 }

@@ -339,6 +339,16 @@ export function fetchVideoAnalyses(token: string, videoId: string) {
   return request<{ analyses: VideoAnalysisRow[] }>(`/admin/videos/${videoId}/analyses`, token);
 }
 
+export function deleteAnalysis(token: string, analysisId: string) {
+  return request<{ success: boolean; error?: string }>(
+    `/admin/analyses/${analysisId}`,
+    token,
+    {
+      method: "DELETE"
+    }
+  );
+}
+
 // PG-Boss Job Monitoring types
 export type JobQueueStats = {
   queueName: string;
