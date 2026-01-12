@@ -14,6 +14,11 @@ const ANALYSIS_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
+    scene: {
+      type: "string",
+      minLength: 1,
+      description: "Describes both the physical environment and the 'vibe'."
+    },
     summarize: {
       type: "string",
       minLength: ANALYSIS_SUMMARY_MIN_LENGTH,
@@ -164,7 +169,7 @@ const ANALYSIS_OUTPUT_SCHEMA = {
       description: "Transcript with speaker diarization."
     }
   },
-  required: ["summarize", "wiki", "characters", "transcript"]
+  required: ["scene", "summarize", "wiki", "characters", "transcript"]
 };
 
 const ANALYSIS_PROMPT_BASE = [
@@ -173,6 +178,7 @@ const ANALYSIS_PROMPT_BASE = [
   "",
   "The JSON must match exactly this schema:",
   "{",
+  "  \"scene\": string,",
   "  \"summarize\": string,",
   "  \"wiki\": [{\"timestamp\": string, \"title\": string, \"details\": string}],",
   "  \"characters\": [{",
@@ -195,6 +201,9 @@ const ANALYSIS_PROMPT_BASE = [
   "General rules:",
   "- Always use English, regardless of the video's language or the user's prompt language.",
   "- Do not invent facts.",
+  "",
+  "\"scene\":",
+  "- Sets the stage. Describes both the physical environment and the \"vibe\".",
   "",
   "\"summarize\":",
   "- 3-6 sentences covering the main thesis and key takeaways. No bullet points.",
@@ -281,6 +290,7 @@ type AnalysisTranscript = {
 };
 
 type AnalysisOutput = {
+  scene: string;
   summarize: string;
   wiki: Array<{
     timestamp: string;
@@ -358,7 +368,10 @@ function parseTimestampToSeconds(value: string) {
 function isValidAnalysisOutput(value: unknown): value is AnalysisOutput {
   if (!value || typeof value !== "object") return false;
   const record = value as AnalysisOutput;
-  
+
+  // Validate scene
+  if (typeof record.scene !== "string" || !record.scene.trim()) return false;
+
   // Validate summarize
   if (typeof record.summarize !== "string") return false;
   const summary = record.summarize.trim();
@@ -786,7 +799,7 @@ export async function registerWorkers(params: {
     }
 
     const model = config.geminiModel;
-    
+
     // Create/update analysis record to pending status
     const claimed = await upsertVideoAnalysis(db, {
       videoId,
@@ -858,10 +871,10 @@ export async function registerWorkers(params: {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "quota_error";
       // Check if this is a business rejection (quota exceeded) vs system failure
-      const isQuotaExceeded = errorMessage.includes("insufficient") || 
-                              errorMessage.includes("exceeded") || 
-                              errorMessage.includes("quota");
-      
+      const isQuotaExceeded = errorMessage.includes("insufficient") ||
+        errorMessage.includes("exceeded") ||
+        errorMessage.includes("quota");
+
       if (isQuotaExceeded) {
         // Business rejection: skip the job
         await updateVideoAnalysis(db, {
@@ -903,13 +916,13 @@ export async function registerWorkers(params: {
       usage = result.usage ?? null;
     } catch (error) {
       const { message, status, retryable } = classifyGeminiError(error);
-      
+
       if (retryable && retryCount < maxRetries) {
         // Let pg-boss handle the retry - keep status as pending
         logger.warn({ videoId, analysisId, status, retryCount, maxRetries, errorMessage: message }, "Analyze video retryable error; will retry");
         throw error;
       }
-      
+
       // Terminal failure - either not retryable or retries exhausted
       await updateVideoAnalysis(db, {
         id: analysisId,
@@ -931,7 +944,7 @@ export async function registerWorkers(params: {
       parsed = parseAnalysisOutput(responseText);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "invalid_analysis_output";
-      
+
       if (retryCount < maxRetries) {
         // Invalid output is retryable - model might return valid JSON on retry
         logger.warn(
@@ -940,7 +953,7 @@ export async function registerWorkers(params: {
         );
         throw error;
       }
-      
+
       // Retries exhausted
       await updateVideoAnalysis(db, {
         id: analysisId,

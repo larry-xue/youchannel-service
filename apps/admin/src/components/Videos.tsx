@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-table";
 import { Link } from "@tanstack/react-router";
 import { useAuth } from "../lib/auth";
+import { useToast } from "../hooks/use-toast";
 import { enqueueAnalysis, fetchAdminVideos, type AdminVideoRow, type AdminVideosParams } from "../lib/jobsApi";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Badge } from "./ui/badge";
@@ -176,6 +177,7 @@ export function Videos() {
       })
   });
 
+  const { toast } = useToast();
   const analyzeMutation = useMutation({
     mutationFn: (row: AdminVideoRow) =>
       enqueueAnalysis(token ?? "", {
@@ -185,9 +187,19 @@ export function Videos() {
     onSuccess: () => {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: ["admin-videos"] });
+      toast({
+        title: "分析已排队",
+        description: "视频正在后台处理中...",
+        type: "success"
+      });
     },
     onError: (err: Error) => {
       setActionError(err.message);
+      toast({
+        title: "分析失败",
+        description: err.message,
+        type: "error"
+      });
     }
   });
 

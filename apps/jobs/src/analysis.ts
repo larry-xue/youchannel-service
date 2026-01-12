@@ -161,7 +161,7 @@ export async function enqueueAnalyses(params: {
   // Filter out videos that are already pending or completed
   const filtered = withinDuration.filter((candidate) => {
     const status = existingStatuses.get(candidate.videoId);
-    if (status === "pending" || status === "completed") {
+    if (status === "pending") {
       skipReasons.already_pending += 1;
       return false;
     }
@@ -194,7 +194,7 @@ export async function enqueueAnalyses(params: {
          error = null,
          skip_reason = null,
          updated_at = NOW()
-       where video_analyses.status not in ('pending', 'completed')
+       where video_analyses.status not in ('pending')
        returning id`,
       [
         candidate.videoId,
