@@ -255,11 +255,6 @@ type VideoAnalysisTarget = {
   raw: Record<string, unknown> | null;
 };
 
-type AnalysisRecord = {
-  id: string;
-  status: AnalysisStatus;
-};
-
 type CharacterEvidence = {
   timestamp: string;
   quote: string;
@@ -527,71 +522,6 @@ async function fetchVideoForAnalysis(db: DbPool, videoId: string) {
   return result.rows[0] ?? null;
 }
 
-async function fetchAnalysisRecord(db: DbPool, videoId: string) {
-  const result = await db.query<AnalysisRecord>(
-    `select id, status
-     from video_analyses
-     where video_id = $1
-     limit 1`,
-    [videoId]
-  );
-  return result.rows[0] ?? null;
-}
-
-/**
- * Create or update analysis record for a video.
- * Uses INSERT ... ON CONFLICT to handle concurrent requests atomically.
- */
-async function upsertVideoAnalysis(
-  db: DbPool,
-  params: {
-    videoId: string;
-    userId: string;
-    status: AnalysisStatus;
-    model: string;
-    analysisText: string;
-    usage: Record<string, unknown> | null;
-    error: string | null;
-    skipReason: string | null;
-  }
-) {
-  const result = await db.query<{ id: string; status: AnalysisStatus }>(
-    `insert into video_analyses (
-       video_id,
-       user_id,
-       analysis_text,
-       model,
-       usage,
-       status,
-       error,
-       skip_reason
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8)
-     on conflict (video_id)
-     do update set
-       user_id = excluded.user_id,
-       analysis_text = excluded.analysis_text,
-       model = excluded.model,
-       usage = excluded.usage,
-       status = excluded.status,
-       error = excluded.error,
-       skip_reason = excluded.skip_reason,
-       updated_at = NOW()
-     returning id, status`,
-    [
-      params.videoId,
-      params.userId,
-      params.analysisText,
-      params.model,
-      params.usage,
-      params.status,
-      params.error,
-      params.skipReason
-    ]
-  );
-
-  return result.rows[0] ?? null;
-}
-
 /**
  * Update an existing analysis record by ID.
  */
@@ -775,18 +705,17 @@ export async function registerWorkers(params: {
       return { status: ANALYSIS_STATUS.skipped, reason: "payload_mismatch" };
     }
 
-    // Check if analysis already exists and is completed/skipped
-    const existing = await fetchAnalysisRecord(db, videoId);
-    if (existing && (existing.status === ANALYSIS_STATUS.completed || existing.status === ANALYSIS_STATUS.skipped)) {
-      logger.info({ videoId, analysisId: existing.id, status: existing.status }, "Analyze video skipped; already handled");
-      return { status: existing.status, analysisId: existing.id, reason: "analysis_exists" };
+    // Use analysisId from payload (already created when enqueuing)
+    const analysisId = payload.analysisId;
+    if (!analysisId) {
+      logger.error({ videoId, userId, jobId: job.id }, "Analyze video missing analysisId in payload");
+      throw new Error("analyze.video missing analysisId");
     }
 
     const durationSec = parseDurationToSeconds(video.duration);
     if (durationSec === null || durationSec <= 0) {
-      const skipped = await upsertVideoAnalysis(db, {
-        videoId,
-        userId,
+      await updateVideoAnalysis(db, {
+        id: analysisId,
         status: ANALYSIS_STATUS.skipped,
         model: config.geminiModel,
         analysisText: "Skipped: duration_invalid",
@@ -794,35 +723,17 @@ export async function registerWorkers(params: {
         error: null,
         skipReason: "duration_invalid"
       });
-      logger.info({ videoId, analysisId: skipped?.id }, "Analyze video skipped; duration invalid");
-      return { status: ANALYSIS_STATUS.skipped, reason: "duration_invalid", analysisId: skipped?.id };
+      logger.info({ videoId, analysisId }, "Analyze video skipped; duration invalid");
+      return { status: ANALYSIS_STATUS.skipped, reason: "duration_invalid", analysisId };
     }
 
     const model = config.geminiModel;
-
-    // Create/update analysis record to pending status
-    const claimed = await upsertVideoAnalysis(db, {
-      videoId,
-      userId,
-      status: ANALYSIS_STATUS.pending,
-      model,
-      analysisText: "",
-      usage: null,
-      error: null,
-      skipReason: null
-    });
-
-    if (!claimed) {
-      logger.warn({ videoId }, "Analyze video skipped; failed to create analysis record");
-      return { status: ANALYSIS_STATUS.skipped, reason: "analysis_record_missing" };
-    }
-
-    const analysisId = claimed.id;
     const jobId = String(job.id ?? "");
     if (!jobId) {
       logger.error({ videoId, analysisId }, "Analyze video missing job id");
       throw new Error("analyze.video missing job id");
     }
+
 
     let quotaEventId: string | null = null;
     const refundQuota = async (reason: string) => {

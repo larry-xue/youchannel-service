@@ -20,11 +20,6 @@ type VideoCandidateRow = {
   duration: string | null;
 };
 
-type AnalysisStatusRow = {
-  video_id: string;
-  status: string;
-};
-
 function parseNumeric(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -143,25 +138,24 @@ export async function enqueueAnalyses(params: {
     return { enqueued: 0, skipped: params.candidates.length, skipReasons };
   }
 
-  // Check existing analysis statuses
+  // Only filter out videos that already have a pending analysis
   const candidateIds = withinDuration.map((candidate) => candidate.videoId);
-  const existingStatuses = new Map<string, string>();
+  const pendingSet = new Set<string>();
   if (candidateIds.length > 0) {
-    const existing = await params.db.query<AnalysisStatusRow>(
-      `select video_id, status
+    const existing = await params.db.query<{ video_id: string }>(
+      `select video_id
        from video_analyses
-       where video_id = any($1::uuid[])`,
+       where video_id = any($1::uuid[]) and status = 'pending'`,
       [candidateIds]
     );
     for (const row of existing.rows) {
-      existingStatuses.set(row.video_id, row.status);
+      pendingSet.add(row.video_id);
     }
   }
 
-  // Filter out videos that are already pending or completed
+  // Filter out videos that already have a pending analysis
   const filtered = withinDuration.filter((candidate) => {
-    const status = existingStatuses.get(candidate.videoId);
-    if (status === "pending") {
+    if (pendingSet.has(candidate.videoId)) {
       skipReasons.already_pending += 1;
       return false;
     }
@@ -175,7 +169,7 @@ export async function enqueueAnalyses(params: {
 
   let enqueued = 0;
   for (const candidate of filtered) {
-    // Create pending analysis record
+    // Create new pending analysis record
     const queued = await params.db.query<{ id: string }>(
       `insert into video_analyses (
          video_id,
@@ -187,14 +181,6 @@ export async function enqueueAnalyses(params: {
          error,
          skip_reason
        ) values ($1, $2, $3, $4, $5, $6, $7, $8)
-       on conflict (video_id)
-       do update set
-         user_id = excluded.user_id,
-         status = excluded.status,
-         error = null,
-         skip_reason = null,
-         updated_at = NOW()
-       where video_analyses.status not in ('pending')
        returning id`,
       [
         candidate.videoId,
@@ -207,6 +193,7 @@ export async function enqueueAnalyses(params: {
         null
       ]
     );
+
 
     if (!queued.rows[0]?.id) {
       skipReasons.already_pending += 1;
