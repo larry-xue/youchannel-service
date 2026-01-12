@@ -180,10 +180,6 @@ export function VideoAnalyses() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm">{analysis.model || "-"}</TableCell>
-                    <TableCell className="text-sm max-w-[200px] truncate">
-                      {analysis.prompt?.slice(0, 50) || "-"}
-                      {analysis.prompt && analysis.prompt.length > 50 && "..."}
-                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatTime(analysis.created_at)}
                     </TableCell>
