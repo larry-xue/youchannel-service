@@ -19,7 +19,6 @@ const VALID_VOICES = new Set([
 ]);
 const DEFAULT_VOICE = "Puck";
 
-const DEFAULT_LANGUAGE = "en-US";
 // eslint-disable-next-line @typescript-eslint/naming-convention
 const ANALYSIS_OUTPUT_SCHEMA = {
   type: "object",
@@ -186,11 +185,11 @@ const ANALYSIS_PROMPT_BASE = [
   "- If name is unknown, use \"Unknown Speaker 1\", \"Unknown Speaker 2\", etc.",
   "- \"traits\": 2-6 short tags.",
   "- \"voice\": Choose the best matching voice for TTS based on the character's personality and speaking style.",
-  "  Available voices (Name -- Tone): Zephyr--Bright, Puck--Upbeat, Charon--Informative, Kore--Firm, Fenrir--Excitable, Leda--Youthful,",
-  "  Orus--Firm, Aoede--Breezy, Callirrhoe--Easy-going, Autonoe--Bright, Enceladus--Breathy, Iapetus--Clear,",
-  "  Umbriel--Easy-going, Algieba--Smooth, Despina--Smooth, Erinome--Clear, Algenib--Gravelly, Rasalgethi--Informative,",
-  "  Laomedeia--Upbeat, Achernar--Soft, Alnilam--Firm, Schedar--Even, Gacrux--Mature, Pulcherrima--Forward,",
-  "  Achird--Friendly, Zubenelgenubi--Casual, Vindemiatrix--Gentle, Sadachbia--Lively, Sadaltager--Knowledgeable, Sulafat--Warm.",
+  "  Available voices (Name -- Tone, Gender, Pitch): Zephyr--Bright (female, higher pitch), Puck--Upbeat (male, middle pitch), Charon--Informative (male, lower pitch), Kore--Firm (female, middle pitch), Fenrir--Excitable (male, lower middle pitch), Leda--Youthful (female, higher pitch),",
+  "  Orus--Firm (male, lower middle pitch), Aoede--Breezy (female, middle pitch), Callirrhoe--Easy-going (female, middle pitch), Autonoe--Bright (female, middle pitch), Enceladus--Breathy (male, lower pitch), Iapetus--Clear (male, lower middle pitch),",
+  "  Umbriel--Easy-going (male, lower middle pitch), Algieba--Smooth (male, lower pitch), Despina--Smooth (female, middle pitch), Erinome--Clear (female, middle pitch), Algenib--Gravelly (male, lower pitch), Rasalgethi--Informative (male, middle pitch),",
+  "  Laomedeia--Upbeat (female, higher pitch), Achernar--Soft (female, higher pitch), Alnilam--Firm (male, lower middle pitch), Schedar--Even (male, lower middle pitch), Gacrux--Mature (female, middle pitch), Pulcherrima--Forward (female, middle pitch),",
+  "  Achird--Friendly (male, lower middle pitch), Zubenelgenubi--Casual (male, lower middle pitch), Vindemiatrix--Gentle (female, middle pitch), Sadachbia--Lively (male, lower pitch), Sadaltager--Knowledgeable (male, middle pitch), Sulafat--Warm (female, middle pitch).",
   `- "language":`,
   ` - Pick the BCP-47 code that matches what this character ACTUALLY SPEAKS in the video.`,
   ` - DO NOT default to "en-US".`,
