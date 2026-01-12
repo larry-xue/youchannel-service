@@ -114,30 +114,8 @@ const ANALYSIS_OUTPUT_SCHEMA = {
               "uk-UA", "bn-BD", "en-IN", "mr-IN", "ta-IN", "te-IN"
             ],
           },
-          evidence: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                timestamp: {
-                  type: "string",
-                  pattern: ANALYSIS_TIMESTAMP_PATTERN,
-                  description: "Timestamp of the quote."
-                },
-                quote: {
-                  type: "string",
-                  maxLength: 200,
-                  description: "Short quote (<= 20 words)."
-                }
-              },
-              required: ["timestamp", "quote"]
-            },
-            minItems: 1,
-            maxItems: 3,
-            description: "1-3 short quotes with timestamps."
-          }
         },
-        required: ["name", "kind", "description", "traits", "speaking_style", "notable_topics", "evidence", "voice", "language"]
+        required: ["name", "kind", "description", "traits", "speaking_style", "notable_topics", "voice", "language"]
       },
       maxItems: 8,
       description: "0-8 main characters/speakers in the video."
@@ -196,35 +174,11 @@ const ANALYSIS_OUTPUT_SCHEMA = {
 };
 
 const ANALYSIS_PROMPT_BASE = [
-  "Return ONLY a valid JSON object (RFC 8259). Use double quotes for all keys and strings.",
+  "Analyze the video and return a structured JSON response.",
   "Do not include any extra keys, markdown, code fences, comments, or surrounding text.",
   "",
-  "The JSON must match exactly this schema:",
-  "{",
-  "  \"scene\": string,",
-  "  \"summarize\": string,",
-  "  \"wiki\": [{\"timestamp\": string, \"title\": string, \"details\": string}],",
-  "  \"characters\": [{",
-  "    \"name\": string,",
-  "    \"kind\": \"host\"|\"guest\"|\"narrator\"|\"character\"|\"unknown\",",
-  "    \"description\": string,",
-  "    \"traits\": [string],",
-  "    \"speaking_style\": string,",
-  "    \"notable_topics\": [string],",
-  "    \"evidence\": [{\"timestamp\": string, \"quote\": string}],",
-  "    \"voice\": string,",
-  "    \"language\": string",
-  "  }],",
-  "  \"transcript\": {",
-  "    \"language\": string,",
-  "    \"is_truncated\": boolean,",
-  "    \"cursor\": string,",
-  "    \"segments\": [{\"start\": string, \"end\": string, \"speaker\": string, \"text\": string}]",
-  "  }",
-  "}",
-  "",
   "General rules:",
-  "- Always use English, regardless of the video's language or the user's prompt language.",
+  "- Write all narrative text (summaries, descriptions, details, traits) in English.",
   "- Do not invent facts.",
   "",
   "\"scene\":",
@@ -244,18 +198,14 @@ const ANALYSIS_PROMPT_BASE = [
   "- Do not include people only mentioned in passing.",
   "- If name is unknown, use \"Unknown Speaker 1\", \"Unknown Speaker 2\", etc.",
   "- \"traits\": 2-6 short tags.",
-  "- \"evidence\": 1-3 short quotes (<= 20 words each) with timestamps.",
   "- \"voice\": Choose the best matching voice for TTS based on the character's personality and speaking style.",
   "  Available voices (Name -- Tone): Zephyr--Bright, Puck--Upbeat, Charon--Informative, Kore--Firm, Fenrir--Excitable, Leda--Youthful,",
   "  Orus--Firm, Aoede--Breezy, Callirrhoe--Easy-going, Autonoe--Bright, Enceladus--Breathy, Iapetus--Clear,",
   "  Umbriel--Easy-going, Algieba--Smooth, Despina--Smooth, Erinome--Clear, Algenib--Gravelly, Rasalgethi--Informative,",
   "  Laomedeia--Upbeat, Achernar--Soft, Alnilam--Firm, Schedar--Even, Gacrux--Mature, Pulcherrima--Forward,",
   "  Achird--Friendly, Zubenelgenubi--Casual, Vindemiatrix--Gentle, Sadachbia--Lively, Sadaltager--Knowledgeable, Sulafat--Warm.",
-  "- \"language\": BCP-47 code of the language the character speaks. Detect from the video audio.",
-  "  Supported: ar-EG, de-DE, en-US, es-US, fr-FR, hi-IN, id-ID, it-IT, ja-JP, ko-KR, pt-BR, ru-RU,",
-  "  nl-NL, pl-PL, th-TH, tr-TR, vi-VN, ro-RO, uk-UA, bn-BD, en-IN, mr-IN, ta-IN, te-IN.",
-  "  Default to 'en-US' if the language cannot be recognized.",
-  "",
+  "- \"language\": BCP-47 code of the detected spoken language",
+  "  Supported: ar-EG=Arabic (Egypt), de-DE=German (Germany), en-US=English (United States), es-US=Spanish (United States), fr-FR=French (France), hi-IN=Hindi (India), id-ID=Indonesian (Indonesia), it-IT=Italian (Italy), ja-JP=Japanese (Japan), ko-KR=Korean (South Korea), pt-BR=Portuguese (Brazil), ru-RU=Russian (Russia), nl-NL=Dutch (Netherlands), pl-PL=Polish (Poland), th-TH=Thai (Thailand), tr-TR=Turkish (Turkey), vi-VN=Vietnamese (Vietnam), ro-RO=Romanian (Romania), uk-UA=Ukrainian (Ukraine), bn-BD=Bengali (Bangladesh), en-IN=English (India), mr-IN=Marathi (India), ta-IN=Telugu (India), te-IN=Telugu (India).",
   "\"transcript\":",
   "- \"segments\" must be chronological.",
   "- \"start\" and \"end\" timestamps must match the same timestamp regex.",
@@ -290,11 +240,6 @@ type VideoAnalysisTarget = {
   raw: Record<string, unknown> | null;
 };
 
-type CharacterEvidence = {
-  timestamp: string;
-  quote: string;
-};
-
 type AnalysisCharacter = {
   name: string;
   kind: string;
@@ -302,7 +247,6 @@ type AnalysisCharacter = {
   traits: string[];
   speaking_style: string;
   notable_topics: string[];
-  evidence: CharacterEvidence[];
   voice: string;
   language: string;
 };
@@ -434,7 +378,6 @@ function isValidAnalysisOutput(value: unknown): value is AnalysisOutput {
     if (!Array.isArray(char.traits)) return false;
     if (typeof char.speaking_style !== "string") return false;
     if (!Array.isArray(char.notable_topics)) return false;
-    if (!Array.isArray(char.evidence)) return false;
     if (typeof char.voice !== "string") return false;
     if (!VALID_VOICES.has(char.voice)) {
       char.voice = DEFAULT_VOICE;
