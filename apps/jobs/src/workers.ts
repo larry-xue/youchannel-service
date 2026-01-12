@@ -9,10 +9,26 @@ import type { DbPool } from "./db.js";
 const ANALYSIS_SUMMARY_MIN_LENGTH = 20;
 const ANALYSIS_TIMESTAMP_PATTERN = "^\\d{2}:\\d{2}$|^\\d{1,2}:\\d{2}:\\d{2}$";
 const ANALYSIS_TIMESTAMP_REGEX = /^(?:\d{2}:\d{2}|\d{1,2}:\d{2}:\d{2})$/;
+
+const VALID_VOICES = new Set([
+  "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda",
+  "Orus", "Aoede", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus",
+  "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi",
+  "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima",
+  "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+]);
+const DEFAULT_VOICE = "Puck";
+
+const VALID_LANGUAGES = new Set([
+  "ar-EG", "de-DE", "en-US", "es-US", "fr-FR", "hi-IN",
+  "id-ID", "it-IT", "ja-JP", "ko-KR", "pt-BR", "ru-RU",
+  "nl-NL", "pl-PL", "th-TH", "tr-TR", "vi-VN", "ro-RO",
+  "uk-UA", "bn-BD", "en-IN", "mr-IN", "ta-IN", "te-IN"
+]);
+const DEFAULT_LANGUAGE = "en-US";
 // eslint-disable-next-line @typescript-eslint/naming-convention
 const ANALYSIS_OUTPUT_SCHEMA = {
   type: "object",
-  additionalProperties: false,
   properties: {
     scene: {
       type: "string",
@@ -29,7 +45,6 @@ const ANALYSIS_OUTPUT_SCHEMA = {
       minItems: 1,
       items: {
         type: "object",
-        additionalProperties: false,
         properties: {
           timestamp: {
             type: "string",
@@ -54,7 +69,6 @@ const ANALYSIS_OUTPUT_SCHEMA = {
       type: "array",
       items: {
         type: "object",
-        additionalProperties: false,
         properties: {
           name: {
             type: "string",
@@ -90,20 +104,20 @@ const ANALYSIS_OUTPUT_SCHEMA = {
           },
           voice: {
             type: "string",
+          },
+          language: {
+            type: "string",
             enum: [
-              "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda",
-              "Orus", "Aoede", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus",
-              "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi",
-              "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima",
-              "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+              "ar-EG", "de-DE", "en-US", "es-US", "fr-FR", "hi-IN",
+              "id-ID", "it-IT", "ja-JP", "ko-KR", "pt-BR", "ru-RU",
+              "nl-NL", "pl-PL", "th-TH", "tr-TR", "vi-VN", "ro-RO",
+              "uk-UA", "bn-BD", "en-IN", "mr-IN", "ta-IN", "te-IN"
             ],
-            description: "Voice for TTS. Choose based on character's speaking style and personality. Voice tones: Zephyr=Bright, Puck=Upbeat, Charon=Informative, Kore=Firm, Fenrir=Excitable, Leda=Youthful, Orus=Firm, Aoede=Breezy, Callirrhoe=Easy-going, Autonoe=Bright, Enceladus=Breathy, Iapetus=Clear, Umbriel=Easy-going, Algieba=Smooth, Despina=Smooth, Erinome=Clear, Algenib=Gravelly, Rasalgethi=Informative, Laomedeia=Upbeat, Achernar=Soft, Alnilam=Firm, Schedar=Even, Gacrux=Mature, Pulcherrima=Forward, Achird=Friendly, Zubenelgenubi=Casual, Vindemiatrix=Gentle, Sadachbia=Lively, Sadaltager=Knowledgeable, Sulafat=Warm."
           },
           evidence: {
             type: "array",
             items: {
               type: "object",
-              additionalProperties: false,
               properties: {
                 timestamp: {
                   type: "string",
@@ -123,14 +137,13 @@ const ANALYSIS_OUTPUT_SCHEMA = {
             description: "1-3 short quotes with timestamps."
           }
         },
-        required: ["name", "kind", "description", "traits", "speaking_style", "notable_topics", "evidence", "voice"]
+        required: ["name", "kind", "description", "traits", "speaking_style", "notable_topics", "evidence", "voice", "language"]
       },
       maxItems: 8,
       description: "0-8 main characters/speakers in the video."
     },
     transcript: {
       type: "object",
-      additionalProperties: false,
       properties: {
         language: {
           type: "string",
@@ -149,7 +162,6 @@ const ANALYSIS_OUTPUT_SCHEMA = {
           type: "array",
           items: {
             type: "object",
-            additionalProperties: false,
             properties: {
               start: {
                 type: "string",
@@ -200,7 +212,8 @@ const ANALYSIS_PROMPT_BASE = [
   "    \"speaking_style\": string,",
   "    \"notable_topics\": [string],",
   "    \"evidence\": [{\"timestamp\": string, \"quote\": string}],",
-  "    \"voice\": string",
+  "    \"voice\": string,",
+  "    \"language\": string",
   "  }],",
   "  \"transcript\": {",
   "    \"language\": string,",
@@ -238,6 +251,10 @@ const ANALYSIS_PROMPT_BASE = [
   "  Umbriel--Easy-going, Algieba--Smooth, Despina--Smooth, Erinome--Clear, Algenib--Gravelly, Rasalgethi--Informative,",
   "  Laomedeia--Upbeat, Achernar--Soft, Alnilam--Firm, Schedar--Even, Gacrux--Mature, Pulcherrima--Forward,",
   "  Achird--Friendly, Zubenelgenubi--Casual, Vindemiatrix--Gentle, Sadachbia--Lively, Sadaltager--Knowledgeable, Sulafat--Warm.",
+  "- \"language\": BCP-47 code of the language the character speaks. Detect from the video audio.",
+  "  Supported: ar-EG, de-DE, en-US, es-US, fr-FR, hi-IN, id-ID, it-IT, ja-JP, ko-KR, pt-BR, ru-RU,",
+  "  nl-NL, pl-PL, th-TH, tr-TR, vi-VN, ro-RO, uk-UA, bn-BD, en-IN, mr-IN, ta-IN, te-IN.",
+  "  Default to 'en-US' if the language cannot be recognized.",
   "",
   "\"transcript\":",
   "- \"segments\" must be chronological.",
@@ -287,6 +304,7 @@ type AnalysisCharacter = {
   notable_topics: string[];
   evidence: CharacterEvidence[];
   voice: string;
+  language: string;
 };
 
 type TranscriptSegment = {
@@ -418,6 +436,13 @@ function isValidAnalysisOutput(value: unknown): value is AnalysisOutput {
     if (!Array.isArray(char.notable_topics)) return false;
     if (!Array.isArray(char.evidence)) return false;
     if (typeof char.voice !== "string") return false;
+    if (!VALID_VOICES.has(char.voice)) {
+      char.voice = DEFAULT_VOICE;
+    }
+    if (typeof char.language !== "string") return false;
+    if (!VALID_LANGUAGES.has(char.language)) {
+      char.language = DEFAULT_LANGUAGE;
+    }
   }
 
   // Validate transcript
