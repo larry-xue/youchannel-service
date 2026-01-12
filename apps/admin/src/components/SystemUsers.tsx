@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { Link } from "@tanstack/react-router";
 import {
@@ -9,7 +9,7 @@ import {
   type PaginationState,
 } from "@tanstack/react-table";
 import { useAuth } from "../lib/auth";
-import { fetchSystemUsers, type SystemUserRow, type SystemUsersParams, type YoutubeAccountSummary } from "../lib/jobsApi";
+import { fetchSystemUsers, deleteSystemUser, type SystemUserRow, type SystemUsersParams, type YoutubeAccountSummary } from "../lib/jobsApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -30,10 +30,11 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { ChevronDown, ChevronUp, Eye, RefreshCw, Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye, RefreshCw, Coins, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Trash2, AlertTriangle } from "lucide-react";
 
 const PAGE_SIZE_OPTIONS = [
   { value: "10", label: "每页 10 条" },
@@ -167,6 +168,7 @@ const columnHelper = createColumnHelper<SystemUserRow>();
 export function SystemUsers() {
   const { session } = useAuth();
   const token = session?.access_token;
+  const queryClient = useQueryClient();
 
   // Filter form state
   const [formEmail, setFormEmail] = useState("");
@@ -181,6 +183,9 @@ export function SystemUsers() {
     pageSize: 20,
   });
 
+  // Delete user state
+  const [deletingUser, setDeletingUser] = useState<SystemUserRow | null>(null);
+
   const usersQuery = useQuery({
     queryKey: ["system-users", filters, pagination],
     enabled: Boolean(token),
@@ -190,6 +195,17 @@ export function SystemUsers() {
         limit: pagination.pageSize,
         offset: pagination.pageIndex * pagination.pageSize
       })
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      if (!token) throw new Error("No token");
+      return deleteSystemUser(token, userId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["system-users"] });
+      setDeletingUser(null);
+    }
   });
 
   const rows: SystemUserRow[] = usersQuery.data?.rows ?? [];
@@ -359,11 +375,21 @@ export function SystemUsers() {
         id: "actions",
         header: "操作",
         cell: (info) => (
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/quotas" search={{ userId: info.row.original.id }}>
-              <Coins className="h-4 w-4" />
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/quotas" search={{ userId: info.row.original.id }}>
+                <Coins className="h-4 w-4" />
+              </Link>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => setDeletingUser(info.row.original)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         ),
       }),
     ],
@@ -591,6 +617,60 @@ export function SystemUsers() {
           </>
         )}
       </CardContent>
+
+      <Dialog open={!!deletingUser} onOpenChange={(open) => !open && setDeletingUser(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              删除用户
+            </DialogTitle>
+            <DialogDescription>
+              您确定要删除此用户吗？此操作无法撤销。
+            </DialogDescription>
+          </DialogHeader>
+
+          {deletingUser && (
+            <div className="py-2 text-sm">
+              <p>用户: <span className="font-semibold">{deletingUser.email || deletingUser.id}</span></p>
+              <p className="mt-2 text-muted-foreground">
+                这将永久删除该用户的所有数据，包括:
+              </p>
+              <ul className="mt-1 list-disc list-inside text-muted-foreground">
+                <li>关联的 YouTube 账户</li>
+                <li>视频和分析数据</li>
+                <li>配额和订阅信息</li>
+                <li>所有其他关联数据</li>
+              </ul>
+            </div>
+          )}
+
+          {deleteMutation.error && (
+            <Alert variant="destructive" className="my-2 p-2">
+              <div className="text-sm">
+                {String(deleteMutation.error)}
+              </div>
+            </Alert>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeletingUser(null)}
+              disabled={deleteMutation.isPending}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deletingUser && deleteMutation.mutate(deletingUser.id)}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? "正在删除..." : "确认删除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

@@ -149,19 +149,27 @@ export function registerAdminSystemUserRoutes(app: FastifyInstance, deps: Deps) 
       return { error: "invalid_offset" };
     }
 
-    const [users, youtubeAccounts, quotasResult] = await Promise.all([
+    const [users, youtubeAccounts, quotasResult, adminUsersResult] = await Promise.all([
       listAllAuthUsers(deps.supabase),
       listAllYoutubeAccounts(deps.supabase),
       deps.supabase
         .from("user_quotas")
         .select(
           "user_id, video_seconds_total, video_seconds_remaining, chat_seconds_total, chat_seconds_remaining, max_video_seconds, period_start_at, period_end_at"
-        )
+        ),
+      deps.supabase.from("admin_users").select("user_id")
     ]);
 
     if (quotasResult.error) {
       throw quotasResult.error;
     }
+
+    if (adminUsersResult.error) {
+      throw adminUsersResult.error;
+    }
+
+    const adminUserIds = new Set(adminUsersResult.data.map((u) => u.user_id));
+
 
     const accountsByUser = new Map<string, YoutubeAccountSummary[]>();
     for (const account of youtubeAccounts) {
@@ -187,7 +195,7 @@ export function registerAdminSystemUserRoutes(app: FastifyInstance, deps: Deps) 
       });
     }
 
-    let filteredUsers = users;
+    let filteredUsers = users.filter((user) => !adminUserIds.has(user.id));
 
     if (email) {
       const lowerEmail = email.toLowerCase();
@@ -223,5 +231,34 @@ export function registerAdminSystemUserRoutes(app: FastifyInstance, deps: Deps) 
     }));
 
     return { rows, total };
+  });
+
+  app.delete("/admin/system-users/:userId", { preHandler: deps.requireAdmin }, async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+
+    // 1. Check if the user is an admin
+    const { data: adminUser, error: adminCheckError } = await deps.supabase
+      .from("admin_users")
+      .select("user_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (adminCheckError) {
+      throw adminCheckError;
+    }
+
+    if (adminUser) {
+      reply.code(403);
+      return { error: "Cannot delete an admin user" };
+    }
+
+    // 2. Delete the user from Supabase Auth (cascades to related tables)
+    const { error: deleteError } = await deps.supabase.auth.admin.deleteUser(userId);
+
+    if (deleteError) {
+      throw deleteError;
+    }
+
+    return { success: true };
   });
 }

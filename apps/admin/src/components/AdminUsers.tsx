@@ -378,29 +378,6 @@ export function AdminUsers() {
           );
         },
       }),
-      columnHelper.display({
-        id: "actions",
-        header: "操作",
-        cell: (info) => {
-          const row = info.row.original;
-          const isCurrentUser = row.user_id === session?.user.id;
-          return (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => handleRemove(row.user_id)}
-              disabled={removeMutation.isPending || isCurrentUser}
-              aria-label={
-                isCurrentUser
-                  ? "无法移除自己的访问权限"
-                  : "移除管理员用户"
-              }
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          );
-        },
-      }),
     ],
     [session?.user.id, handleRemove, removeMutation.isPending] // added dependencies for actions
   );

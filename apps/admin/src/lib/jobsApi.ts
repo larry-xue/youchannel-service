@@ -188,6 +188,16 @@ export function fetchSystemUsers(token: string, params?: SystemUsersParams) {
   return request<{ rows: SystemUserRow[]; total: number }>(path, token);
 }
 
+export function deleteSystemUser(token: string, userId: string) {
+  return request<{ success: boolean; error?: string }>(
+    `/admin/system-users/${userId}`,
+    token,
+    {
+      method: "DELETE"
+    }
+  );
+}
+
 // Quota admin types
 export type QuotaGrant = {
   id: string;
