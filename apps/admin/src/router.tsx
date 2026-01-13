@@ -1,9 +1,9 @@
-import { ToastProvider } from "./hooks/use-toast";
-import { ToastContainer } from "./components/ui/toast-container";
+import { ToastProvider } from "@/hooks/use-toast";
+import { ToastContainer } from "@/components/ui/toast-container";
 import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
-import { AuthGate } from "./components/AuthGate";
-import { Dashboard } from "./components/Dashboard";
-import { VideoAnalyses } from "./components/VideoAnalyses";
+import { AuthGate } from "@/components/AuthGate";
+import { Dashboard } from "@/components/Dashboard";
+import { VideoAnalyses } from "@/components/VideoAnalyses";
 
 function RootLayout() {
   return (

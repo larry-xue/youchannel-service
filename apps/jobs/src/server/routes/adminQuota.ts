@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { parseLimit, parseOptionalString, parseRequiredString } from "../utils.js";
+import { parseLimit, parseOptionalString, parseRequiredString } from "@jobs/server/utils";
 
 type Deps = {
   supabase: SupabaseClient;

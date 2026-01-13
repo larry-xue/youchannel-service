@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { DbPool } from "../../db.js";
-import { parseLimit, parseOffset, parseOptionalQueryString } from "../utils.js";
+import type { DbPool } from "@jobs/db";
+import { parseLimit, parseOffset, parseOptionalQueryString } from "@jobs/server/utils";
 
 type Deps = {
   db: DbPool;

@@ -7,16 +7,16 @@ import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
-import type { Config } from "./config.js";
-import { createAdminGuard } from "./admin-auth.js";
-import type { DbPool } from "./db.js";
-import { createServiceKeyGuard } from "./server/guards.js";
-import { registerOpenApiRoutes } from "./server/routes/openapi.js";
-import { registerAdminVideoRoutes } from "./server/routes/adminVideos.js";
-import { registerAdminUserRoutes } from "./server/routes/adminUsers.js";
-import { registerAdminSystemUserRoutes } from "./server/routes/adminSystemUsers.js";
-import { registerAdminQuotaRoutes } from "./server/routes/adminQuota.js";
-import { registerAdminJobRoutes } from "./server/routes/adminJobs.js";
+import type { Config } from "@jobs/config";
+import { createAdminGuard } from "@jobs/admin-auth";
+import type { DbPool } from "@jobs/db";
+import { createServiceKeyGuard } from "@jobs/server/guards";
+import { registerOpenApiRoutes } from "@jobs/server/routes/openapi";
+import { registerAdminVideoRoutes } from "@jobs/server/routes/adminVideos";
+import { registerAdminUserRoutes } from "@jobs/server/routes/adminUsers";
+import { registerAdminSystemUserRoutes } from "@jobs/server/routes/adminSystemUsers";
+import { registerAdminQuotaRoutes } from "@jobs/server/routes/adminQuota";
+import { registerAdminJobRoutes } from "@jobs/server/routes/adminJobs";
 
 export async function buildServer(params: {
   config: Config;

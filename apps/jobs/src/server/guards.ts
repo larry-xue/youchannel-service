@@ -1,5 +1,5 @@
-import type { Config } from "../config.js";
-import { readHeaderValue } from "./utils.js";
+import type { Config } from "@jobs/config";
+import { readHeaderValue } from "@jobs/server/utils";
 
 function extractServiceKey(headers: Record<string, string | string[] | undefined>) {
   const direct =

@@ -1,13 +1,13 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useAuth } from "../lib/auth";
-import { supabase } from "../lib/supabase";
-import { Button } from "./ui/button";
+import { useAuth } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+} from "@/components/ui/dropdown-menu";
 
 import { Film, LogOut, Shield, Users, Coins, ChevronDown, Activity } from "lucide-react";
 

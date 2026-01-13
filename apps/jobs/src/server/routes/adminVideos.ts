@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { PgBoss } from "pg-boss";
-import type { Config } from "../../config.js";
-import type { DbPool } from "../../db.js";
-import { enqueueAnalyses, fetchAnalysisCandidates } from "../../analysis.js";
-import { listAdminVideos, fetchVideoAnalyses, deleteVideoAnalysis } from "../../db.js";
+import type { Config } from "@jobs/config";
+import type { DbPool } from "@jobs/db";
+import { enqueueAnalyses, fetchAnalysisCandidates } from "@jobs/analysis";
+import { listAdminVideos, fetchVideoAnalyses, deleteVideoAnalysis } from "@jobs/db";
 import {
   parseLimit,
   parseOffset,
@@ -11,7 +11,7 @@ import {
   parseStringArray,
   parseRequiredString,
   normalizeUnique
-} from "../utils.js";
+} from "@jobs/server/utils";
 
 type Deps = {
   db: DbPool;

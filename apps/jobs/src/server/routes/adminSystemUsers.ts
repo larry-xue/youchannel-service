@@ -5,7 +5,7 @@ import {
   parseOffset,
   parseOptionalQueryString,
   parseTimestamp
-} from "../utils.js";
+} from "@jobs/server/utils";
 
 type YoutubeAccountRow = {
   id: string;

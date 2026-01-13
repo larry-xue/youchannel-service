@@ -2,9 +2,9 @@ import type { Job, PgBoss } from "pg-boss";
 import type { Logger } from "pino";
 import { chat, type StreamChunk } from "@tanstack/ai";
 import { createGeminiChat } from "@tanstack/ai-gemini";
-import { captureException } from "./sentry.js";
-import type { Config } from "./config.js";
-import type { DbPool } from "./db.js";
+import { captureException } from "@jobs/sentry";
+import type { Config } from "@jobs/config";
+import type { DbPool } from "@jobs/db";
 
 const ANALYSIS_SUMMARY_MIN_LENGTH = 20;
 const ANALYSIS_TIMESTAMP_PATTERN = "^\\d{2}:\\d{2}$|^\\d{1,2}:\\d{2}:\\d{2}$";

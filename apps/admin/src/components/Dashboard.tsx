@@ -1,10 +1,10 @@
 import { useRouterState } from "@tanstack/react-router";
-import { AdminHeader } from "./AdminHeader";
-import { AdminUsers } from "./AdminUsers";
-import { SystemUsers } from "./SystemUsers";
-import { Videos } from "./Videos";
-import { QuotaManagement } from "./QuotaManagement";
-import { JobMonitor } from "./JobMonitor";
+import { AdminHeader } from "@/components/AdminHeader";
+import { AdminUsers } from "@/components/AdminUsers";
+import { SystemUsers } from "@/components/SystemUsers";
+import { Videos } from "@/components/Videos";
+import { QuotaManagement } from "@/components/QuotaManagement";
+import { JobMonitor } from "@/components/JobMonitor";
 
 type Tab = "system-users" | "admin-users" | "videos" | "quotas" | "jobs";
 

@@ -1,0 +1,11 @@
+{
+  "resolveFullPaths": true,
+  "replacers": {
+    "default": {
+      "enabled": true,
+      "fileExtensions": {
+        ".js": ".js"
+      }
+    }
+  }
+}

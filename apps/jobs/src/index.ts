@@ -15,14 +15,14 @@ if (result.error && !result.parsed) {
 
 import { PgBoss } from "pg-boss";
 import type { Logger } from "pino";
-import type { Config } from "./config.js";
-import { loadConfig } from "./config.js";
-import { buildLogger } from "./logger.js";
-import { initSentry } from "./sentry.js";
-import { buildSupabaseClient } from "./supabase.js";
-import { buildServer } from "./server.js";
-import { createDbPool } from "./db.js";
-import { registerWorkers } from "./workers.js";
+import type { Config } from "@jobs/config";
+import { loadConfig } from "@jobs/config";
+import { buildLogger } from "@jobs/logger";
+import { initSentry } from "@jobs/sentry";
+import { buildSupabaseClient } from "@jobs/supabase";
+import { buildServer } from "@jobs/server";
+import { createDbPool } from "@jobs/db";
+import { registerWorkers } from "@jobs/workers";
 
 
 function isValidDatabaseUrl(databaseUrl: string) {

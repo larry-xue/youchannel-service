@@ -1,7 +1,7 @@
 import type { PgBoss } from "pg-boss";
-import type { DbPool } from "./db.js";
-import type { Config } from "./config.js";
-import { getQueueName } from "./workers.js";
+import type { DbPool } from "@jobs/db";
+import type { Config } from "@jobs/config";
+import { getQueueName } from "@jobs/workers";
 
 export type AnalysisCandidate = {
   videoId: string;

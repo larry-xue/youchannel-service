@@ -34,12 +34,22 @@ pnpm lint                 # Currently no-op (no linter configured)
 - If adding tests, consider installing `vitest` (works well with Vite and TypeScript)
 - Example single test command (after setup): `pnpm -C apps/jobs test -- JobWorker.spec.ts`
 
+### Path Alias Resolution for Runtime
+**Important**: TypeScript path aliases are resolved at build time using `tsc-alias`.
+
+- **Dev mode** (`tsx watch`): Path aliases work automatically via `tsx`
+- **Production build**: `tsc` compiles TypeScript, then `tsc-alias` converts aliases to relative paths with `.js` extensions
+- **Build configuration**: See `tsconfig.build.json` in each package for `tsc-alias` settings
+
 ## Code Style Guidelines
 
 ### File & Module Format
 - **TypeScript** with strict mode enabled
 - **ESM** only - use `import`/`export`
-- **Extensions**: Use explicit `.js` extensions for relative imports: `import { foo } from './utils.js'`
+- **Import Paths**: Use path aliases for internal imports (no file extensions):
+  - `apps/jobs`: `@jobs/*` → `src/*`
+  - `apps/admin`: `@/*` → `src/*`
+  - `packages/core`: `@core/*` → `src/*`
 - **Built-ins**: Use `node:` prefix: `import { join } from 'node:path'`
 
 ### Naming Conventions
@@ -59,13 +69,15 @@ pnpm lint                 # Currently no-op (no linter configured)
 1. Node.js built-ins (with `node:` prefix)
 2. External dependencies
 3. Internal workspace dependencies (`@youchannel/core`)
-4. Relative imports (with explicit `.js` extensions)
+4. Internal module aliases (`@jobs/*`, `@/*`, `@core/*`)
+5. Relative imports (only for same-directory files)
 
 ```typescript
 import { readFile } from 'node:fs';
 import fastify from 'fastify';
 import { JobType } from '@youchannel/core';
-import { config } from './config.js';
+import { config } from '@jobs/config';
+import { logger } from '@jobs/logger';
 ```
 
 ### TypeScript Rules

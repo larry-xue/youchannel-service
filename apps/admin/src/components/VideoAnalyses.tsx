@@ -1,13 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link } from "@tanstack/react-router";
-import { useAuth } from "../lib/auth";
-import { fetchVideoAnalyses, deleteAnalysis, type VideoAnalysisRow } from "../lib/jobsApi";
-import { Alert, AlertDescription } from "./ui/alert";
-import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Skeleton } from "./ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
+import { useAuth } from "@/lib/auth";
+import { fetchVideoAnalyses, deleteAnalysis, type VideoAnalysisRow } from "@/lib/jobsApi";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -15,8 +15,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "./ui/dialog";
-import { useToast } from "../hooks/use-toast";
+} from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Eye, RefreshCw, Trash2, AlertTriangle } from "lucide-react";
 import { useState } from "react";
 import JsonView from "react18-json-view";

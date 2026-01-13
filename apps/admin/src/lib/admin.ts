@@ -1,6 +1,6 @@
-﻿import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "./auth";
-import { supabase } from "./supabase";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 
 export function useAdminAccess() {
   const { session } = useAuth();

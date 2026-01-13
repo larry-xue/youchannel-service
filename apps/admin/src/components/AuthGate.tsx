@@ -1,11 +1,11 @@
-import { LoginForm } from "./LoginForm";
-import { useAdminAccess } from "../lib/admin";
-import { useAuth } from "../lib/auth";
-import { supabase } from "../lib/supabase";
+import { LoginForm } from "@/components/LoginForm";
+import { useAdminAccess } from "@/lib/admin";
+import { useAuth } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 import { Outlet } from "@tanstack/react-router";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Alert, AlertDescription } from "./ui/alert";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2 } from "lucide-react";
 
 export function AuthGate() {
