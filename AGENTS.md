@@ -24,6 +24,11 @@ pnpm build                # Build all packages
 pnpm -C apps/jobs build   # Build jobs (tsc)
 pnpm -C apps/admin build  # Build admin (vite)
 
+# Preview Production Build (build + run locally)
+pnpm preview              # Build all and preview in parallel
+pnpm preview:jobs         # Preview jobs service only
+pnpm preview:admin        # Preview admin panel only (http://localhost:4173)
+
 # Linting
 pnpm lint                 # Currently no-op (no linter configured)
 ```

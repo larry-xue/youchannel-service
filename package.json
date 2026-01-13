@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build",
+    "preview": "pnpm build && pnpm -r --parallel preview",
+    "preview:jobs": "pnpm -C apps/jobs preview",
+    "preview:admin": "pnpm -C apps/admin preview",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"
   }
