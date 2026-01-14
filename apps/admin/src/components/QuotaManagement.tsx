@@ -122,7 +122,12 @@ export function QuotaManagement() {
     maxVideoSeconds: "1800",
     sourceType: "manual",
     sourceRef: "",
-    validTo: "",
+    validTo: (() => {
+      const d = new Date();
+      d.setMonth(d.getMonth() + 1);
+      const pad = (n: number) => n.toString().padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    })(),
     consumePriority: "100"
   });
 
@@ -140,6 +145,21 @@ export function QuotaManagement() {
     queryFn: () => fetchUserQuota(token ?? "", activeUserId ?? "")
   });
 
+  const refreshMutation = useMutation({
+    mutationFn: (userId: string) => refreshQuotaCache(token ?? "", userId),
+    onSuccess: (data) => {
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setError(null);
+        queryClient.invalidateQueries({ queryKey: ["user-quota", activeUserId] });
+      }
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+    }
+  });
+
   const addGrantMutation = useMutation({
     mutationFn: (params: AddGrantParams) => addQuotaGrant(token ?? "", params),
     onSuccess: (data) => {
@@ -148,7 +168,9 @@ export function QuotaManagement() {
       } else {
         setAddGrantOpen(false);
         setError(null);
-        queryClient.invalidateQueries({ queryKey: ["user-quota", activeUserId] });
+        if (activeUserId) {
+          refreshMutation.mutate(activeUserId);
+        }
       }
     },
     onError: (err: Error) => {
@@ -175,21 +197,6 @@ export function QuotaManagement() {
     }
   });
 
-  const refreshMutation = useMutation({
-    mutationFn: (userId: string) => refreshQuotaCache(token ?? "", userId),
-    onSuccess: (data) => {
-      if (data.error) {
-        setError(data.error);
-      } else {
-        setError(null);
-        queryClient.invalidateQueries({ queryKey: ["user-quota", activeUserId] });
-      }
-    },
-    onError: (err: Error) => {
-      setError(err.message);
-    }
-  });
-
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -198,7 +205,11 @@ export function QuotaManagement() {
       setError("请输入用户 ID");
       return;
     }
-    setActiveUserId(trimmed);
+    if (trimmed === activeUserId) {
+      quotaQuery.refetch();
+    } else {
+      setActiveUserId(trimmed);
+    }
   };
 
   const handleAddGrant = (e: React.FormEvent) => {
@@ -413,8 +424,8 @@ export function QuotaManagement() {
               onChange={(e) => setSearchUserId(e.target.value)}
               className="flex-1"
             />
-            <Button type="submit" disabled={quotaQuery.isLoading}>
-              {quotaQuery.isLoading ? (
+            <Button type="submit" disabled={quotaQuery.isFetching}>
+              {quotaQuery.isFetching ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Search className="h-4 w-4" />
@@ -615,13 +626,14 @@ export function QuotaManagement() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label>过期时间 (可选)</Label>
+                    <Label>过期时间</Label>
                     <Input
                       type="datetime-local"
                       value={grantForm.validTo}
                       onChange={(e) =>
                         setGrantForm({ ...grantForm, validTo: e.target.value })
                       }
+                      required
                     />
                   </div>
                   <DialogFooter>
