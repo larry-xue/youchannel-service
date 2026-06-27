@@ -39,7 +39,7 @@ supabase db execute "
 ```sql
 -- 添加初始管理员（替换为实际的用户邮箱）
 INSERT INTO public.admin_users (user_id)
-SELECT id FROM auth.users WHERE email = 'admin@example.com'
+SELECT id FROM auth.users WHERE email = 'admin@your-domain.example'
 ON CONFLICT (user_id) DO NOTHING;
 ```
 
@@ -53,7 +53,7 @@ ON CONFLICT (user_id) DO NOTHING;
 2. 进入 **Authentication** > **Users**
 3. 点击 **Add user** > **Create new user**
 4. 输入：
-   - **Email**: 管理员邮箱（如 `admin@example.com`）
+   - **Email**: 管理员邮箱（如 `admin@your-domain.example`）
    - **Password**: 设置初始密码
    - **Auto Confirm User**: 勾选（跳过邮箱验证）
 5. 点击 **Create user**
@@ -64,8 +64,8 @@ ON CONFLICT (user_id) DO NOTHING;
 ```bash
 # 使用 Supabase CLI 创建用户（需要 service_role key）
 supabase auth admin create-user \
-  --email admin@example.com \
-  --password "YourSecurePassword123!" \
+  --email admin@your-domain.example \
+  --password "REPLACE_WITH_STRONG_PASSWORD" \
   --email-confirm
 ```
 
@@ -74,8 +74,8 @@ supabase auth admin create-user \
 ```javascript
 // 使用 Supabase Admin API
 const { data, error } = await supabase.auth.admin.createUser({
-  email: 'admin@example.com',
-  password: 'YourSecurePassword123!',
+  email: 'admin@your-domain.example',
+  password: 'REPLACE_WITH_STRONG_PASSWORD',
   email_confirm: true
 });
 ```
@@ -106,7 +106,7 @@ const { data, error } = await supabase.auth.admin.createUser({
 # 发送密码重置邮件
 supabase auth admin generate-link \
   --type recovery \
-  --email admin@example.com
+  --email admin@your-domain.example
 ```
 
 ### 管理员直接重置密码（需要 service_role）
@@ -159,11 +159,11 @@ ORDER BY au.created_at DESC;
 
 -- 添加管理员
 INSERT INTO public.admin_users (user_id)
-SELECT id FROM auth.users WHERE email = 'new-admin@example.com';
+SELECT id FROM auth.users WHERE email = 'new-admin@your-domain.example';
 
 -- 删除管理员
 DELETE FROM public.admin_users 
-WHERE user_id = (SELECT id FROM auth.users WHERE email = 'admin-to-remove@example.com');
+WHERE user_id = (SELECT id FROM auth.users WHERE email = 'admin-to-remove@your-domain.example');
 ```
 
 ## 完整设置流程示例
@@ -174,8 +174,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'admin-to-remove@exampl
    ```bash
    # 通过 Supabase Dashboard
    # Authentication > Users > Add user > Create new user
-   # Email: admin@example.com
-   # Password: YourSecurePassword123!
+   # Email: admin@your-domain.example
+   # Password: REPLACE_WITH_STRONG_PASSWORD
    # Auto Confirm User: ✓
    ```
 
@@ -183,7 +183,7 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'admin-to-remove@exampl
    ```sql
    -- 在 Supabase SQL Editor 中执行
    INSERT INTO public.admin_users (user_id)
-   SELECT id FROM auth.users WHERE email = 'admin@example.com';
+   SELECT id FROM auth.users WHERE email = 'admin@your-domain.example';
    ```
 
 3. **登录管理面板**

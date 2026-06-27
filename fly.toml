@@ -7,9 +7,10 @@ app = 'youchannel-service'
 primary_region = 'iad'
 
 [build]
-  [build.args]
-    VITE_SUPABASE_URL = "https://wzbiqlxovmxlatrgxzgc.supabase.co"
-    VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6YmlxbHhvdm14bGF0cmd4emdjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5OTE4OTQsImV4cCI6MjA4MjU2Nzg5NH0.SdGOKw9iHdOP_cHU9XcJF4klEhs-oc_-2w61b_ooEU0"
+  # Pass public admin client config at deploy time:
+  # fly deploy \
+  #   --build-arg VITE_SUPABASE_URL=... \
+  #   --build-arg VITE_SUPABASE_ANON_KEY=...
 
 
 [env]

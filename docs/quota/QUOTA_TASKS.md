@@ -4,7 +4,7 @@ This document breaks down the quota design into linear, 1-2 day tasks suitable f
 
 ## Task 1 - Read and align on design
 Goal: Ensure understanding before implementation.
-- Read docs/QUOTA_DESIGN.md.
+- Read docs/quota/QUOTA_DESIGN.md.
 - Confirm scope: no data migration, new tables only.
 - List open questions (if any) and confirm answers.
 Acceptance:
@@ -18,12 +18,12 @@ Goal: Add user_quotas, quota_grants, quota_usage_events, quota_usage_splits.
 - Create indexes including partial indexes and events list index.
 Acceptance:
 - Migration applies cleanly in a local environment.
-- Tables and indexes match docs/QUOTA_DESIGN.md.
+- Tables and indexes match docs/quota/QUOTA_DESIGN.md.
 
 ## Task 3 - Add RLS policies
 Goal: Enable RLS and allow users to read their own data only.
 - ENABLE RLS on all four tables.
-- Add SELECT policies per docs/QUOTA_DESIGN.md.
+- Add SELECT policies per docs/quota/QUOTA_DESIGN.md.
 - Confirm no direct insert/update permissions for normal users.
 Acceptance:
 - RLS enabled with correct policies.
@@ -68,13 +68,13 @@ Goal: Allow manual adjustments and audit.
 - Provide a minimal admin script or SQL snippet:
   - Add grants for a user.
   - Issue refunds via RPC or direct events.
-- Document in docs/QUOTA_DESIGN.md or a new admin note.
+- Document in docs/quota/QUOTA_DESIGN.md or a new admin note.
 Acceptance:
 - A documented procedure exists for support to adjust quotas.
 
 ## Task 8 - Final review and cleanup
 Goal: Verify expectations and update docs.
 - Confirm all tasks are completed in order.
-- Update docs/QUOTA_DESIGN.md with any implementation notes.
+- Update docs/quota/QUOTA_DESIGN.md with any implementation notes.
 Acceptance:
 - README or BUSINESS_LOGIC.md references the new quota system.
